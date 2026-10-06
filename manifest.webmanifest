@@ -1,0 +1,15 @@
+{
+  "name": "Pupo · Terminal de Gastos",
+  "short_name": "Pupo",
+  "description": "Registro de gastos con foto de boleta, trazabilidad y dashboard financiero.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1118",
+  "theme_color": "#0b1118",
+  "lang": "es-CL",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

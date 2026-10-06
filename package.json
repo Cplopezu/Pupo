@@ -1,0 +1,11 @@
+{
+  "name": "pupo-gastos",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Registro de gastos con foto de boleta y dashboard financiero (PWA sin servidor).",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "node --test tests/*.test.js"
+  }
+}

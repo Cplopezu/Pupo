@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1118">
+  <meta name="description" content="Registro de gastos con foto de boleta, trazabilidad y dashboard financiero.">
+  <title>Pupo · Terminal de Gastos</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◆</span>
+      <span class="brand-name">PUPO</span>
+      <span class="brand-sub">EXPENSE TERMINAL</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab is-active" data-view="dashboard" role="tab">Dashboard</button>
+      <button class="tab" data-view="registrar" role="tab">Registrar</button>
+      <button class="tab" data-view="libro" role="tab">Libro</button>
+      <button class="tab" data-view="ajustes" role="tab">Ajustes</button>
+    </nav>
+    <div class="status">
+      <span class="dot-live"></span>
+      <span id="clock" class="mono">--:--:--</span>
+    </div>
+  </header>
+
+  <div class="ticker" aria-label="Variación por categoría">
+    <div class="ticker-track" id="ticker"></div>
+  </div>
+
+  <main>
+    <!-- DASHBOARD -->
+    <section class="view is-active" id="view-dashboard">
+      <div class="toolbar">
+        <div class="seg" id="periodo">
+          <button data-p="mes" class="is-active">Mes actual</button>
+          <button data-p="mesant">Mes anterior</button>
+          <button data-p="3m">90 días</button>
+          <button data-p="ytd">Año</button>
+          <button data-p="12m">12 meses</button>
+        </div>
+        <div class="toolbar-meta" id="periodo-label"></div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="grid-main">
+        <article class="panel panel-wide clickable" id="panel-acum" tabindex="0">
+          <header class="panel-head">
+            <h2>Gasto acumulado <span class="muted">· actual vs período anterior</span></h2>
+            <span class="hint">Pinche para analizar ›</span>
+          </header>
+          <div class="legend" id="legend-acum"></div>
+          <div class="chart" id="chart-acum"></div>
+        </article>
+
+        <article class="panel">
+          <header class="panel-head">
+            <h2>Por categoría</h2>
+            <span class="hint">Pinche una fila ›</span>
+          </header>
+          <div id="cat-bars" class="hbars"></div>
+        </article>
+
+        <article class="panel panel-wide clickable" id="panel-flujo" tabindex="0">
+          <header class="panel-head">
+            <h2 id="flujo-title">Flujo diario</h2>
+            <span class="hint">Pinche para analizar ›</span>
+          </header>
+          <div class="chart" id="chart-flujo"></div>
+        </article>
+
+        <article class="panel">
+          <header class="panel-head">
+            <h2>Top comercios</h2>
+            <span class="hint">Pinche una fila ›</span>
+          </header>
+          <div id="top-comercios" class="hbars"></div>
+        </article>
+
+        <article class="panel panel-full">
+          <header class="panel-head">
+            <h2>Últimos movimientos</h2>
+            <button class="btn-ghost" data-goto="libro">Ver libro completo ›</button>
+          </header>
+          <div id="ultimos"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- REGISTRAR -->
+    <section class="view" id="view-registrar">
+      <form id="form-gasto" class="form-grid" autocomplete="off">
+        <div class="panel photo-panel">
+          <header class="panel-head"><h2 id="form-title">Nueva boleta</h2></header>
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="foto" accept="image/*" capture="environment" hidden>
+            <img id="foto-preview" alt="" hidden>
+            <div class="dz-empty" id="dz-empty">
+              <div class="dz-icon">⌗</div>
+              <div class="dz-title">Tomar foto de la boleta</div>
+              <div class="muted">o arrastre una imagen aquí</div>
+            </div>
+          </label>
+          <div class="ocr-bar" id="ocr-bar" hidden>
+            <div class="ocr-progress"><span id="ocr-progress"></span></div>
+            <span id="ocr-status" class="muted mono">Leyendo boleta…</span>
+          </div>
+          <div class="photo-actions">
+            <button type="button" class="btn-ghost" id="btn-ocr" disabled>Leer boleta (OCR)</button>
+            <button type="button" class="btn-ghost" id="btn-quitar-foto" disabled>Quitar foto</button>
+          </div>
+          <p class="muted small">La lectura automática propone monto, fecha, RUT y comercio. Revise antes de guardar.</p>
+        </div>
+
+        <div class="panel">
+          <header class="panel-head"><h2>Datos del gasto</h2></header>
+          <div class="fields">
+            <label class="field field-big">
+              <span>Monto total</span>
+              <input type="text" inputmode="decimal" name="monto" id="f-monto" required placeholder="0">
+            </label>
+            <label class="field">
+              <span>Fecha</span>
+              <input type="date" name="fecha" id="f-fecha" required>
+            </label>
+            <label class="field">
+              <span>Comercio</span>
+              <input type="text" name="comercio" id="f-comercio" list="dl-comercios" required placeholder="Ej: Jumbo">
+              <datalist id="dl-comercios"></datalist>
+            </label>
+            <label class="field">
+              <span>Categoría</span>
+              <select name="categoria" id="f-categoria" required></select>
+            </label>
+            <label class="field">
+              <span>Medio de pago</span>
+              <select name="medioPago" id="f-medio"></select>
+            </label>
+            <label class="field">
+              <span>Tipo de documento</span>
+              <select name="documento" id="f-doc">
+                <option>Boleta</option>
+                <option>Factura</option>
+                <option>Comprobante</option>
+                <option>Sin respaldo</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>N° folio</span>
+              <input type="text" name="folio" id="f-folio" placeholder="Opcional">
+            </label>
+            <label class="field">
+              <span>RUT emisor</span>
+              <input type="text" name="rut" id="f-rut" placeholder="76.123.456-7">
+            </label>
+            <label class="field field-full">
+              <span>Notas</span>
+              <textarea name="notas" id="f-notas" rows="2" placeholder="Centro de costo, proyecto, motivo…"></textarea>
+            </label>
+          </div>
+          <div class="form-alert" id="form-alert" hidden></div>
+          <div class="form-actions">
+            <button type="button" class="btn-ghost" id="btn-cancelar">Limpiar</button>
+            <button type="submit" class="btn-primary" id="btn-guardar">Guardar gasto</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- LIBRO -->
+    <section class="view" id="view-libro">
+      <div class="toolbar">
+        <input type="search" id="q" class="search" placeholder="Buscar comercio, folio, RUT, nota…">
+        <select id="filtro-cat" class="select"></select>
+        <input type="month" id="filtro-mes" class="select">
+        <label class="check"><input type="checkbox" id="filtro-anulados"> Ver anulados</label>
+        <span class="toolbar-meta" id="libro-resumen"></span>
+      </div>
+      <div class="panel panel-flush">
+        <div id="libro-tabla"></div>
+      </div>
+    </section>
+
+    <!-- AJUSTES -->
+    <section class="view" id="view-ajustes">
+      <div class="grid-ajustes">
+        <div class="panel">
+          <header class="panel-head"><h2>Presupuesto mensual por categoría</h2></header>
+          <p class="muted small">Base para el control de consumo y la proyección de cierre.</p>
+          <div id="presupuestos" class="fields"></div>
+          <div class="form-actions"><button class="btn-primary" id="btn-guardar-ppto">Guardar presupuesto</button></div>
+        </div>
+        <div class="panel">
+          <header class="panel-head"><h2>Respaldo y exportación</h2></header>
+          <p class="muted small">Los datos y fotos se guardan en este dispositivo. Exporte un respaldo periódicamente.</p>
+          <div class="stack">
+            <button class="btn-ghost" id="btn-export-json">Descargar respaldo completo (.json con fotos)</button>
+            <button class="btn-ghost" id="btn-export-csv">Exportar libro a Excel (.csv)</button>
+            <label class="btn-ghost file-btn">Restaurar respaldo…<input type="file" id="import-json" accept="application/json" hidden></label>
+          </div>
+          <div class="storage" id="storage-info"></div>
+        </div>
+        <div class="panel">
+          <header class="panel-head"><h2>Datos de demostración</h2></header>
+          <p class="muted small">Cargue 6 meses de gastos ficticios para explorar el dashboard. Se pueden eliminar sin tocar sus registros reales.</p>
+          <div class="stack">
+            <button class="btn-ghost" id="btn-demo">Cargar datos demo</button>
+            <button class="btn-ghost danger" id="btn-demo-del">Eliminar datos demo</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <button class="fab" id="fab" aria-label="Registrar boleta">＋ Boleta</button>
+
+  <!-- PANEL DE ANÁLISIS (drill-down) -->
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-labelledby="drawer-title">
+    <header class="drawer-head">
+      <div>
+        <div class="drawer-kicker" id="drawer-kicker">ANÁLISIS</div>
+        <h2 id="drawer-title">—</h2>
+      </div>
+      <div class="drawer-nav">
+        <button class="icon-btn" id="drawer-back" title="Volver" hidden>‹</button>
+        <button class="icon-btn" id="drawer-close" title="Cerrar">✕</button>
+      </div>
+    </header>
+    <div class="drawer-body" id="drawer-body"></div>
+  </aside>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
