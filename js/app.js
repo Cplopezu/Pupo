@@ -335,7 +335,7 @@ function tablaGastos(list, { vacio = 'Sin movimientos', limite, foot = false } =
     <tr data-gasto="${g.id}" class="${g.anulado ? 'anulado' : ''}">
       <td>${g.imagenId ? `<img class="thumb" data-img="${g.imagenId}" alt="">` : '<span class="thumb-empty">s/f</span>'}</td>
       <td class="mono">${fechaCorta(g.fecha)}</td>
-      <td><div>${esc(g.comercio)}</div><div class="id">${folio(g)}${g.folio ? ' · N° ' + esc(g.folio) : ''}</div></td>
+      <td><div>${esc(g.comercio)}${g.comercioPendiente ? '<span class="tag-pendiente">● completar</span>' : ''}</div><div class="id">${folio(g)}${g.folio ? ' · N° ' + esc(g.folio) : ''}</div></td>
       <td class="hide-sm"><span class="tag"><i class="swatch" style="background:${colorCat(g.categoria)}"></i>${esc(g.categoria)}</span></td>
       <td class="hide-sm muted">${esc(g.medioPago || '')}</td>
       <td class="num">${$(g.monto)}</td>
@@ -706,6 +706,8 @@ function drillRespaldo() {
       const mSin = total(sin);
       let ins = `<p><b>${conF} de ${A.length}</b> gastos tienen foto de respaldo (${pctPlano(pc)}).</p>`;
       if (sin.length) ins += `<p>Hay <b>${$(mSin)}</b> sin respaldo documental (${pctPlano(tA ? mSin / tA * 100 : 0)} del monto). Pinche un gasto para editarlo y adjuntar la boleta.</p>`;
+      const pend = A.filter(g => g.comercioPendiente).length;
+      if (pend) ins += `<p><b>${pend}</b> ${pend === 1 ? 'gasto tiene' : 'gastos tienen'} el comercio por identificar (marcados “● completar” en el libro).</p>`;
       const porCat = agrupar(A, g => g.categoria);
       return hero(pctPlano(pc), '', 'de los gastos con foto de boleta')
         + `<div class="insight">${ins}</div>`
@@ -908,6 +910,11 @@ function bindForm() {
   el('btn-cancelar').addEventListener('click', limpiarForm);
   el('form-gasto').addEventListener('submit', e => { e.preventDefault(); guardar(); });
   el('f-monto').addEventListener('blur', () => { const v = parseMonto(el('f-monto').value); if (v > 0) el('f-monto').value = num(v); });
+  el('sug-chips').addEventListener('click', e => {
+    const b = e.target.closest('.sug-chip'); if (!b) return;
+    el('f-comercio').value = b.dataset.nombre;
+    el('f-comercio').dispatchEvent(new Event('change'));
+  });
   el('cat-chips').addEventListener('click', e => {
     const b = e.target.closest('.cat-chip'); if (!b) return;
     setCategoria(b.dataset.valor); el('cat-chips').dataset.manual = '1';
@@ -967,6 +974,7 @@ async function ejecutarOCR() {
     const previo = res.rut && [...activos()].sort(ordenReciente).find(g => g.rut && rutN(g.rut) === rutN(res.rut));
     if (previo) res.comercio = previo.comercio;
     if (res.comercio && !el('f-comercio').value) { marcar('f-comercio', res.comercio); el('f-comercio').dispatchEvent(new Event('change')); }
+    mostrarSugerencias(previo ? [previo.comercio] : (res.candidatos || []));
     if (!previo && !el('cat-chips').dataset.manual) { const sug = sugerirCategoria(res.texto); if (sug) setCategoria(sug); }
     const n = ['monto', 'fecha', 'rut', 'folio', 'comercio'].filter(k => res[k]).length;
     prog.style.width = '100%';
@@ -977,6 +985,18 @@ async function ejecutarOCR() {
   } finally {
     el('btn-ocr').disabled = !S.foto;
   }
+}
+
+// Botones con comercios sugeridos: los leídos en la boleta primero, luego los más frecuentes.
+function mostrarSugerencias(ocr = []) {
+  const frecuentes = agrupar(activos().filter(g => !g.comercioPendiente), g => g.comercio)
+    .sort((a, b) => b.n - a.n).slice(0, 6).map(c => c.clave);
+  const vistos = new Set();
+  const items = [...ocr.map(n => ({ n, ocr: true })), ...frecuentes.map(n => ({ n }))]
+    .filter(x => { const k = x.n.toLowerCase(); if (vistos.has(k)) return false; vistos.add(k); return true; })
+    .slice(0, 7);
+  el('sug-chips').innerHTML = items.map(x => `<button type="button" class="sug-chip${x.ocr ? ' ocr' : ''}" data-nombre="${esc(x.n)}" title="${x.ocr ? 'Leído en la boleta' : 'Comercio frecuente'}">${esc(x.n)}</button>`).join('');
+  el('sug-comercio').hidden = !items.length;
 }
 
 function setCategoria(c) {
@@ -1000,6 +1020,7 @@ function limpiarForm() {
   document.querySelectorAll('.field.is-ocr').forEach(f => f.classList.remove('is-ocr'));
   delete el('cat-chips').dataset.manual;
   setCategoria(S.categorias[0]);
+  mostrarSugerencias();
 }
 
 async function editar(g) {
@@ -1009,7 +1030,7 @@ async function editar(g) {
   el('btn-guardar').textContent = 'Guardar cambios';
   el('f-monto').value = num(g.monto);
   el('f-fecha').value = g.fecha;
-  el('f-comercio').value = g.comercio;
+  el('f-comercio').value = g.comercioPendiente ? '' : g.comercio;
   setCategoria(g.categoria); el('cat-chips').dataset.manual = '1';
   el('f-medio').value = g.medioPago || MEDIOS[0];
   el('f-doc').value = g.documento || 'Boleta';
@@ -1066,7 +1087,9 @@ async function guardarGasto() {
   const d = leerForm();
   if (!(d.monto > 0)) { avisoForm('Falta el <b>monto</b>. Escríbalo, por ejemplo 12.990.'); el('f-monto').focus(); return; }
   if (!d.fecha) { avisoForm('Falta la <b>fecha</b> del gasto.'); return; }
-  if (!d.comercio) { avisoForm('Falta el <b>comercio</b>. Escriba dónde compró (por ejemplo, Jumbo).'); el('f-comercio').focus(); return; }
+  // Sin comercio no se bloquea: queda identificado por RUT o como pendiente, para completarlo después.
+  d.comercioPendiente = !d.comercio;
+  if (!d.comercio) d.comercio = d.rut ? `RUT ${d.rut}` : 'Por identificar';
 
   // Control de duplicados (solo altas nuevas)
   const form = el('form-gasto');

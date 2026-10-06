@@ -104,15 +104,15 @@ export function interpretar(texto) {
 
   // Comercio: 1) marca conocida en cualquier parte del texto, 2) razón social junto al RUT, 3) primera línea legible
   const marca = MARCAS.find(([re]) => re.test(texto));
+  const iRut = lineas.findIndex(l => /R\.?\s?U\.?\s?T/i.test(l) || /\d{1,2}\.?\d{3}\.?\d{3}\s*-\s*[\dkK]/.test(l));
+  const cercanas = iRut > 0 ? [lineas[iRut - 1], lineas[iRut - 2]] : [];
+  const candidatas = [...cercanas, ...lineas.slice(0, 8)].filter(Boolean).filter(esNombre);
+  const social = candidatas.find(l => /\b(S\.?A\.?|SPA|LTDA|LIMITADA|E\.?I\.?R\.?L)\b/i.test(l));
+  const elegido = social || candidatas[0];
   if (marca) out.comercio = marca[1];
-  else {
-    const iRut = lineas.findIndex(l => /R\.?\s?U\.?\s?T/i.test(l) || /\d{1,2}\.?\d{3}\.?\d{3}\s*-\s*[\dkK]/.test(l));
-    const cercanas = iRut > 0 ? [lineas[iRut - 1], lineas[iRut - 2]] : [];
-    const candidatas = [...cercanas, ...lineas.slice(0, 8)].filter(Boolean).filter(esNombre);
-    const social = candidatas.find(l => /\b(S\.?A\.?|SPA|LTDA|LIMITADA|E\.?I\.?R\.?L)\b/i.test(l));
-    const elegido = social || candidatas[0];
-    if (elegido) out.comercio = limpiarNombre(elegido);
-  }
+  else if (elegido) out.comercio = limpiarNombre(elegido);
+  // Alternativas para elegir con un toque si la principal no es correcta
+  out.candidatos = [...new Set([out.comercio, ...candidatas.map(limpiarNombre)].filter(Boolean))].slice(0, 4);
 
   return out;
 }

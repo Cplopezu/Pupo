@@ -134,9 +134,13 @@
             </label>
             <label class="field">
               <span>Comercio</span>
-              <input type="text" name="comercio" id="f-comercio" list="dl-comercios" placeholder="Ej: Jumbo">
+              <input type="text" name="comercio" id="f-comercio" list="dl-comercios" placeholder="Opcional · Ej: Jumbo">
               <datalist id="dl-comercios"></datalist>
             </label>
+            <div class="field field-full sugerencias" id="sug-comercio" hidden>
+              <span>Toque para elegir el comercio</span>
+              <div class="sug-chips" id="sug-chips"></div>
+            </div>
             <div class="field field-full">
               <span>Categoría Kakebo</span>
               <div class="cat-chips" id="cat-chips" role="group" aria-label="Categoría Kakebo"></div>
