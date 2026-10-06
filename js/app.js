@@ -14,7 +14,28 @@ import { leerBoleta } from './ocr.js';
 /* ============================================================
    Configuración
    ============================================================ */
-const CATEGORIAS_BASE = ['Supermercado', 'Restaurantes', 'Transporte', 'Hogar', 'Salud', 'Servicios', 'Ocio', 'Otros'];
+// Las 4 categorías del método Kakebo
+const CATEGORIAS_BASE = ['Supervivencia', 'Ocio y vicio', 'Cultura', 'Extras'];
+const KAKEBO_DESC = {
+  'Supervivencia': 'Lo necesario: supermercado, transporte, salud, cuentas, arriendo',
+  'Ocio y vicio': 'Lo prescindible: restaurantes, cafés, salidas, suscripciones',
+  'Cultura': 'Lo que te desarrolla: libros, cursos, teatro, museos',
+  'Extras': 'Lo imprevisto: regalos, reparaciones, multas, compras puntuales',
+};
+// Equivalencia desde las categorías de la primera versión
+const MIGRAR_CAT = { Supermercado: 'Supervivencia', Transporte: 'Supervivencia', Hogar: 'Supervivencia', Salud: 'Supervivencia', Servicios: 'Supervivencia', Restaurantes: 'Ocio y vicio', Ocio: 'Ocio y vicio', Otros: 'Extras' };
+// Palabras clave para sugerir la categoría según el comercio o el texto de la boleta
+const PISTAS_CAT = [
+  ['Cultura', /librer|libro|antartica|antártica|buscalibre|teatro|museo|curso|coursera|udemy|platzi|universidad|diplomado|revista|kindle|audible|concierto|opera|ópera|biblioteca/i],
+  ['Ocio y vicio', /restaur|caf[eé]|starbucks|juan valdez|\bbar\b|pub|botiller|cerveza|pizza|sushi|burger|mcdonald|doggis|juan maestro|kfc|cinemark|hoyts|\bcine|netflix|spotify|disney|hbo|prime video|ticket|rappi|pedidos ?ya|uber ?eats|casino|cigarr|tabaco|helad|pasteler/i],
+  ['Extras', /regalo|ferreter|sodimac|\beasy\b|homecenter|ikea|reparaci|taller|mec[aá]nic|veterinar|multa|notar|correos|falabella|paris|ripley|hites|la polar|ropa|zapat/i],
+  ['Supervivencia', /supermerc|jumbo|l[ií]der|unimarc|tottus|santa isabel|acuenta|ekono|mayorista|farmacia|cruz verde|salcobrand|ahumada|copec|shell|petrobras|aramco|enex|metro|\bbip\b|uber|cabify|didi|autopista|\btag\b|enel|aguas|metrogas|gasco|abastible|lipigas|movistar|entel|\bwom\b|\bvtr\b|claro|cl[ií]nica|isapre|fonasa|m[eé]dic|dental|panader|carnicer|verduler|almac[eé]n|arriendo|gastos comunes|colegio|jard[ií]n/i],
+];
+function sugerirCategoria(texto) {
+  const t = String(texto || '');
+  for (const [cat, re] of PISTAS_CAT) if (re.test(t)) return cat;
+  return null;
+}
 const MEDIOS = ['Tarjeta de crédito', 'Tarjeta de débito', 'Efectivo', 'Transferencia', 'Rendición empresa'];
 const PALETA = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
 const GRIS = '#6f8299';
@@ -77,8 +98,28 @@ function toast(msg, ms = 2600) {
    ============================================================ */
 async function cargar() {
   S.gastos = await db.all('gastos');
-  S.categorias = await getAjuste('categorias', CATEGORIAS_BASE);
+  S.categorias = CATEGORIAS_BASE;
   S.presupuestos = await getAjuste('presupuestos', {});
+  await migrarKakebo();
+}
+
+// Convierte registros y presupuestos de categorías antiguas a Kakebo, dejando constancia en la bitácora.
+async function migrarKakebo() {
+  for (const g of S.gastos) {
+    if (CATEGORIAS_BASE.includes(g.categoria)) continue;
+    const nueva = MIGRAR_CAT[g.categoria] || sugerirCategoria(g.comercio) || 'Extras';
+    const antes = g.categoria;
+    g.categoria = nueva;
+    g.historial = [...(g.historial || []), { ts: Date.now(), accion: 'Reclasificado a Kakebo', cambios: [{ campo: 'Categoría', antes, despues: nueva }] }];
+    await db.put('gastos', g);
+  }
+  const claves = Object.keys(S.presupuestos);
+  if (claves.some(k => !CATEGORIAS_BASE.includes(k))) {
+    const p = {};
+    for (const k of claves) { const c = CATEGORIAS_BASE.includes(k) ? k : (MIGRAR_CAT[k] || 'Extras'); p[c] = (p[c] || 0) + (+S.presupuestos[k] || 0); }
+    S.presupuestos = p;
+    await setAjuste('presupuestos', p);
+  }
 }
 
 async function init() {
@@ -306,12 +347,22 @@ function tablaGastos(list, { vacio = 'Sin movimientos', limite, foot = false } =
     <tbody>${rows}</tbody>${pie}</table></div>${mas}`;
 }
 
+// Algunos Safari no guardan Blob en IndexedDB: si falla, se guarda como ArrayBuffer.
+async function guardarImagen(meta, blob) {
+  try {
+    await db.put('imagenes', { ...meta, blob });
+  } catch {
+    await db.put('imagenes', { ...meta, buf: await blob.arrayBuffer(), type: blob.type || 'image/jpeg' });
+  }
+}
+const blobDe = r => r.blob || new Blob([r.buf], { type: r.type || 'image/jpeg' });
+
 const urlCache = new Map();
 async function urlImagen(id) {
   if (urlCache.has(id)) return urlCache.get(id);
   const r = await db.get('imagenes', id);
   if (!r) return null;
-  const u = URL.createObjectURL(r.blob);
+  const u = URL.createObjectURL(blobDe(r));
   urlCache.set(id, u);
   return u;
 }
@@ -814,7 +865,7 @@ function drillGasto(id) {
       });
       body.querySelector('#d-verificar')?.addEventListener('click', async () => {
         const img = await db.get('imagenes', g.imagenId);
-        const h = img ? await sha256(img.blob) : null;
+        const h = img ? await sha256(blobDe(img)) : null;
         const ok = h && h === g.imagenHash;
         body.querySelector('#d-verif').innerHTML = ok ? '<span class="status-chip ok">✔ Íntegra: la foto no ha sido alterada</span>' : '<span class="status-chip ex">✖ La huella no coincide</span>';
       });
@@ -833,6 +884,10 @@ async function registrarCambio(g, accion, cambios, detalle) {
    ============================================================ */
 function poblarSelects() {
   el('f-categoria').innerHTML = S.categorias.map(c => `<option>${esc(c)}</option>`).join('');
+  el('cat-chips').innerHTML = S.categorias.map(c => `
+    <button type="button" class="cat-chip" data-valor="${esc(c)}" aria-pressed="false" style="--c:${colorCat(c)}">
+      <b>${esc(c)}</b><small>${esc(KAKEBO_DESC[c] || '')}</small>
+    </button>`).join('');
   el('f-medio').innerHTML = MEDIOS.map(c => `<option>${esc(c)}</option>`).join('');
   el('filtro-cat').innerHTML = '<option value="">Todas las categorías</option>' + S.categorias.map(c => `<option>${esc(c)}</option>`).join('');
   actualizarDatalist();
@@ -853,11 +908,18 @@ function bindForm() {
   el('btn-cancelar').addEventListener('click', limpiarForm);
   el('form-gasto').addEventListener('submit', e => { e.preventDefault(); guardar(); });
   el('f-monto').addEventListener('blur', () => { const v = parseMonto(el('f-monto').value); if (v > 0) el('f-monto').value = num(v); });
+  el('cat-chips').addEventListener('click', e => {
+    const b = e.target.closest('.cat-chip'); if (!b) return;
+    setCategoria(b.dataset.valor); el('cat-chips').dataset.manual = '1';
+  });
   el('f-comercio').addEventListener('change', () => {
-    // sugiere la categoría usada la última vez en ese comercio
+    // sugiere la categoría usada la última vez en ese comercio, o por palabras clave
     if (S.editId) return;
-    const prev = [...activos()].sort(ordenReciente).find(g => g.comercio.toLowerCase() === el('f-comercio').value.trim().toLowerCase());
-    if (prev) { el('f-categoria').value = prev.categoria; el('f-medio').value = prev.medioPago; }
+    const nombre = el('f-comercio').value.trim().toLowerCase();
+    const prev = [...activos()].sort(ordenReciente).find(g => g.comercio.toLowerCase() === nombre);
+    if (prev) { el('f-medio').value = prev.medioPago; if (!el('cat-chips').dataset.manual) setCategoria(prev.categoria); return; }
+    const sug = sugerirCategoria(nombre);
+    if (sug && !el('cat-chips').dataset.manual) setCategoria(sug);
   });
   limpiarForm();
 }
@@ -900,7 +962,12 @@ async function ejecutarOCR() {
     if (res.fecha) marcar('f-fecha', res.fecha);
     if (res.rut) marcar('f-rut', res.rut);
     if (res.folio) marcar('f-folio', res.folio);
+    // Si el RUT ya se usó antes, se reutiliza el comercio corregido por usted (la app aprende).
+    const rutN = r => String(r || '').replace(/[^\dkK]/g, '').toUpperCase();
+    const previo = res.rut && [...activos()].sort(ordenReciente).find(g => g.rut && rutN(g.rut) === rutN(res.rut));
+    if (previo) res.comercio = previo.comercio;
     if (res.comercio && !el('f-comercio').value) { marcar('f-comercio', res.comercio); el('f-comercio').dispatchEvent(new Event('change')); }
+    if (!previo && !el('cat-chips').dataset.manual) { const sug = sugerirCategoria(res.texto); if (sug) setCategoria(sug); }
     const n = ['monto', 'fecha', 'rut', 'folio', 'comercio'].filter(k => res[k]).length;
     prog.style.width = '100%';
     st.textContent = n ? `✔ ${n} campos detectados (resaltados). Revise antes de guardar.` : 'No se detectaron datos. Complete manualmente.';
@@ -910,6 +977,14 @@ async function ejecutarOCR() {
   } finally {
     el('btn-ocr').disabled = !S.foto;
   }
+}
+
+function setCategoria(c) {
+  el('f-categoria').value = c;
+  el('cat-chips').querySelectorAll('.cat-chip').forEach(b => {
+    const on = b.dataset.valor === c;
+    b.classList.toggle('is-on', on); b.setAttribute('aria-pressed', on);
+  });
 }
 
 function limpiarForm() {
@@ -923,6 +998,8 @@ function limpiarForm() {
   delete el('form-gasto').dataset.confirmado;
   el('ocr-bar').hidden = true;
   document.querySelectorAll('.field.is-ocr').forEach(f => f.classList.remove('is-ocr'));
+  delete el('cat-chips').dataset.manual;
+  setCategoria(S.categorias[0]);
 }
 
 async function editar(g) {
@@ -933,7 +1010,7 @@ async function editar(g) {
   el('f-monto').value = num(g.monto);
   el('f-fecha').value = g.fecha;
   el('f-comercio').value = g.comercio;
-  el('f-categoria').value = g.categoria;
+  setCategoria(g.categoria); el('cat-chips').dataset.manual = '1';
   el('f-medio').value = g.medioPago || MEDIOS[0];
   el('f-doc').value = g.documento || 'Boleta';
   el('f-folio').value = g.folio || '';
@@ -966,10 +1043,30 @@ function leerForm() {
 }
 
 async function guardar() {
+  const btn = el('btn-guardar');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    await guardarGasto();
+  } catch (e) {
+    console.error(e);
+    avisoForm(`No se pudo guardar: ${e?.message || e}. Intente de nuevo; si persiste, guarde sin foto y adjúntela después.`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function avisoForm(html) {
+  const a = el('form-alert');
+  a.hidden = false; a.innerHTML = html;
+  a.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function guardarGasto() {
   const d = leerForm();
-  const alerta = el('form-alert');
-  if (!(d.monto > 0)) { alerta.hidden = false; alerta.textContent = 'Ingrese un monto válido.'; el('f-monto').focus(); return; }
-  if (!d.comercio) { alerta.hidden = false; alerta.textContent = 'Ingrese el comercio.'; return; }
+  if (!(d.monto > 0)) { avisoForm('Falta el <b>monto</b>. Escríbalo, por ejemplo 12.990.'); el('f-monto').focus(); return; }
+  if (!d.fecha) { avisoForm('Falta la <b>fecha</b> del gasto.'); return; }
+  if (!d.comercio) { avisoForm('Falta el <b>comercio</b>. Escriba dónde compró (por ejemplo, Jumbo).'); el('f-comercio').focus(); return; }
 
   // Control de duplicados (solo altas nuevas)
   const form = el('form-gasto');
@@ -978,8 +1075,7 @@ async function guardar() {
     const dupDatos = activos().find(g => g.fecha === d.fecha && g.monto === d.monto && g.comercio.toLowerCase() === d.comercio.toLowerCase());
     const dup = dupFoto || dupDatos;
     if (dup) {
-      alerta.hidden = false;
-      alerta.innerHTML = `⚠ Posible duplicado de <b>${folio(dup)}</b> (${esc(dup.comercio)}, ${fechaCorta(dup.fecha)}, ${$(dup.monto)})${dupFoto ? ' — <b>misma foto</b>' : ''}. Pulse de nuevo para guardar igualmente.`;
+      avisoForm(`⚠ Posible duplicado de <b>${folio(dup)}</b> (${esc(dup.comercio)}, ${fechaCorta(dup.fecha)}, ${$(dup.monto)})${dupFoto ? ' — <b>misma foto</b>' : ''}. Pulse de nuevo para guardar igualmente.`);
       form.dataset.confirmado = '1';
       el('btn-guardar').textContent = 'Guardar de todas formas';
       return;
@@ -990,7 +1086,7 @@ async function guardar() {
   if (S.foto?.blob && S.foto.nueva) {
     imagenId = uid();
     imagenHash = S.foto.hash;
-    await db.put('imagenes', { id: imagenId, blob: S.foto.blob, hash: imagenHash, w: S.foto.w, h: S.foto.h, creado: Date.now() });
+    await guardarImagen({ id: imagenId, hash: imagenHash, w: S.foto.w, h: S.foto.h, creado: Date.now() }, S.foto.blob);
   } else if (S.foto?.existente) {
     imagenId = S.foto.existente; imagenHash = S.foto.hash;
   }
@@ -1083,7 +1179,7 @@ async function exportarJSON() {
   toast('Preparando respaldo…');
   const imgs = await db.all('imagenes');
   const imagenes = [];
-  for (const i of imgs) imagenes.push({ id: i.id, hash: i.hash, w: i.w, h: i.h, creado: i.creado, data: await blobToDataURL(i.blob) });
+  for (const i of imgs) imagenes.push({ id: i.id, hash: i.hash, w: i.w, h: i.h, creado: i.creado, data: await blobToDataURL(blobDe(i)) });
   const payload = { app: 'pupo-gastos', version: 1, exportado: new Date().toISOString(), ajustes: { categorias: S.categorias, presupuestos: S.presupuestos }, gastos: S.gastos, imagenes };
   descargar(`pupo-respaldo-${hoy()}.json`, JSON.stringify(payload), 'application/json');
 }
@@ -1120,14 +1216,12 @@ async function importarJSON(e) {
 
 /* ---------- Datos demo ---------- */
 const DEMO = {
-  Supermercado: { coms: ['Jumbo', 'Líder', 'Unimarc', 'Tottus', 'Santa Isabel'], min: 8000, max: 95000, freq: 0.55 },
-  Restaurantes: { coms: ['Starbucks', 'Juan Maestro', 'Tanta', 'Liguria', 'Doggis'], min: 4500, max: 48000, freq: 0.45 },
-  Transporte: { coms: ['Copec', 'Shell', 'Uber', 'Cabify', 'Autopista Central'], min: 3000, max: 55000, freq: 0.5 },
-  Hogar: { coms: ['Sodimac', 'Easy', 'Homecenter', 'IKEA'], min: 6000, max: 120000, freq: 0.12 },
-  Salud: { coms: ['Cruz Verde', 'Salcobrand', 'Clínica Alemana', 'Ahumada'], min: 4000, max: 85000, freq: 0.12 },
-  Servicios: { coms: ['Enel', 'Aguas Andinas', 'Movistar', 'Metrogas', 'VTR'], min: 15000, max: 65000, freq: 0.08 },
-  Ocio: { coms: ['Cinemark', 'Netflix', 'Spotify', 'Ticketmaster', 'Feria Chilena del Libro'], min: 5000, max: 60000, freq: 0.15 },
-  Otros: { coms: ['Correos de Chile', 'Falabella', 'Paris', 'Ripley'], min: 5000, max: 90000, freq: 0.1 },
+  sup1: { cat: 'Supervivencia', coms: ['Jumbo', 'Líder', 'Unimarc', 'Tottus', 'Santa Isabel'], min: 8000, max: 95000, freq: 0.55 },
+  sup2: { cat: 'Supervivencia', coms: ['Copec', 'Shell', 'Uber', 'Cabify', 'Autopista Central'], min: 3000, max: 55000, freq: 0.5 },
+  sup3: { cat: 'Supervivencia', coms: ['Cruz Verde', 'Salcobrand', 'Enel', 'Aguas Andinas', 'Movistar', 'Metrogas'], min: 4000, max: 70000, freq: 0.2 },
+  ocio: { cat: 'Ocio y vicio', coms: ['Starbucks', 'Juan Maestro', 'Tanta', 'Liguria', 'Doggis', 'Cinemark', 'Netflix', 'Rappi'], min: 4500, max: 48000, freq: 0.55 },
+  cult: { cat: 'Cultura', coms: ['Librería Antártica', 'Buscalibre', 'Teatro Municipal', 'Coursera', 'Museo de Bellas Artes'], min: 5000, max: 60000, freq: 0.1 },
+  extr: { cat: 'Extras', coms: ['Sodimac', 'Falabella', 'Paris', 'Correos de Chile', 'Veterinaria Los Leones'], min: 5000, max: 120000, freq: 0.12 },
 };
 
 function rnd(min, max) { return min + Math.random() * (max - min); }
@@ -1173,8 +1267,9 @@ async function cargarDemo() {
   const nuevos = [];
   for (let f = ini; f <= fin; f = addDays(f, 1)) {
     const dow = toDate(f).getDay();
-    for (const [cat, cfg] of Object.entries(DEMO)) {
-      const pFin = (dow === 5 || dow === 6) && (cat === 'Restaurantes' || cat === 'Ocio') ? 1.8 : 1;
+    for (const cfg of Object.values(DEMO)) {
+      const cat = cfg.cat;
+      const pFin = (dow === 5 || dow === 6) && cat === 'Ocio y vicio' ? 1.8 : 1;
       if (Math.random() < cfg.freq * pFin * 0.55) {
         const sesgo = Math.pow(Math.random(), 2.2);
         const monto = Math.round((cfg.min + sesgo * (cfg.max - cfg.min)) / 10) * 10;
@@ -1192,12 +1287,12 @@ async function cargarDemo() {
     if (g.fecha >= desdeFotos && Math.random() < 0.82) {
       const { blob, hash } = await boletaFalsa(g);
       g.imagenId = uid(); g.imagenHash = hash;
-      await db.put('imagenes', { id: g.imagenId, blob, hash, w: 300, h: 460, creado: g.creado });
+      await guardarImagen({ id: g.imagenId, hash, w: 300, h: 460, creado: g.creado }, blob);
     }
     await db.put('gastos', g);
   }
   if (!Object.keys(S.presupuestos).length) {
-    S.presupuestos = { Supermercado: 420000, Restaurantes: 180000, Transporte: 200000, Hogar: 90000, Salud: 80000, Servicios: 110000, Ocio: 90000, Otros: 70000 };
+    S.presupuestos = { 'Supervivencia': 820000, 'Ocio y vicio': 260000, 'Cultura': 60000, 'Extras': 120000 };
     await setAjuste('presupuestos', S.presupuestos);
   }
   await cargar(); actualizarDatalist();

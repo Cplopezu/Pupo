@@ -98,7 +98,7 @@
 
     <!-- REGISTRAR -->
     <section class="view" id="view-registrar">
-      <form id="form-gasto" class="form-grid" autocomplete="off">
+      <form id="form-gasto" class="form-grid" autocomplete="off" novalidate>
         <div class="panel photo-panel">
           <header class="panel-head"><h2 id="form-title">Nueva boleta</h2></header>
           <label class="dropzone" id="dropzone">
@@ -126,21 +126,22 @@
           <div class="fields">
             <label class="field field-big">
               <span>Monto total</span>
-              <input type="text" inputmode="decimal" name="monto" id="f-monto" required placeholder="0">
+              <input type="text" inputmode="decimal" name="monto" id="f-monto" placeholder="0">
             </label>
             <label class="field">
               <span>Fecha</span>
-              <input type="date" name="fecha" id="f-fecha" required>
+              <input type="date" name="fecha" id="f-fecha">
             </label>
             <label class="field">
               <span>Comercio</span>
-              <input type="text" name="comercio" id="f-comercio" list="dl-comercios" required placeholder="Ej: Jumbo">
+              <input type="text" name="comercio" id="f-comercio" list="dl-comercios" placeholder="Ej: Jumbo">
               <datalist id="dl-comercios"></datalist>
             </label>
-            <label class="field">
-              <span>Categoría</span>
-              <select name="categoria" id="f-categoria" required></select>
-            </label>
+            <div class="field field-full">
+              <span>Categoría Kakebo</span>
+              <div class="cat-chips" id="cat-chips" role="group" aria-label="Categoría Kakebo"></div>
+              <select name="categoria" id="f-categoria" hidden></select>
+            </div>
             <label class="field">
               <span>Medio de pago</span>
               <select name="medioPago" id="f-medio"></select>

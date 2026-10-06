@@ -29,7 +29,7 @@ VUELTO                1.460`;
   assert.equal(r.fecha, '2026-10-03');
   assert.equal(r.rut, '76.543.210-K');
   assert.equal(r.folio, '4587123');
-  assert.equal(r.comercio, 'SUPERMERCADO EL ALBA');
+  assert.equal(r.comercio, 'Supermercado El Alba');
 });
 
 test('interpretar sin línea TOTAL usa el mayor monto', () => {
@@ -58,4 +58,10 @@ test('descomponer explica la variación total', () => {
   assert.equal(d[0].peso, 100);
   assert.equal(total(A), 400);
   assert.deepEqual(serieDiaria(A, '2026-10-01', '2026-10-03'), [300, 100, 0]);
+});
+
+test('interpretar reconoce marcas y razón social junto al RUT', () => {
+  assert.equal(interpretar('WALMART CHILE S.A.\nR.U.T. 76.042.014-K\nTOTAL 12.990').comercio, 'Líder');
+  const r = interpretar('*** BIENVENIDO ***\n12/09/2026\nCOMERCIAL LA ESPIGA SPA\nRUT: 77.123.456-1\nTOTAL 4.500');
+  assert.equal(r.comercio, 'Comercial La Espiga SPA');
 });

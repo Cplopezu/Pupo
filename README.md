@@ -9,7 +9,8 @@ Es una aplicación web instalable (PWA): funciona en el celular con la cámara, 
 **Registro**
 - Foto de la boleta con la cámara (o arrastrando una imagen). Se comprime automáticamente.
 - **Lectura automática (OCR)** en español: propone monto total, fecha, RUT emisor, N° de folio y comercio. Los campos detectados se destacan para revisarlos.
-- Sugiere la categoría y el medio de pago según el último gasto en ese comercio.
+- Clasificación con las **4 categorías del método Kakebo**: Supervivencia, Ocio y vicio, Cultura y Extras, elegibles con un toque.
+- Sugiere la categoría según el comercio o el texto de la boleta, y recuerda el comercio por su RUT: si corrige un nombre una vez, la próxima boleta de ese RUT ya sale bien.
 - **Control de duplicados**: avisa si la misma foto o el mismo monto/fecha/comercio ya fue registrado.
 
 **Trazabilidad**

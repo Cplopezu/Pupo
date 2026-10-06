@@ -34,6 +34,28 @@ export async function leerBoleta(blob, progreso = () => {}) {
   return { texto: data.text, ...interpretar(data.text) };
 }
 
+const MARCAS = [
+  [/JUMBO/i, 'Jumbo'], [/L[IÍ]DER|WALMART/i, 'Líder'], [/UNIMARC/i, 'Unimarc'], [/TOTTUS/i, 'Tottus'],
+  [/SANTA\s*ISABEL/i, 'Santa Isabel'], [/ACUENTA/i, 'Acuenta'], [/CRUZ\s*VERDE/i, 'Cruz Verde'],
+  [/SALCOBRAND/i, 'Salcobrand'], [/AHUMADA/i, 'Farmacias Ahumada'], [/COPEC/i, 'Copec'], [/SHELL|ENEX/i, 'Shell'],
+  [/ARAMCO|PETROBRAS/i, 'Aramco'], [/SODIMAC|HOMECENTER/i, 'Sodimac'], [/\bEASY\b/i, 'Easy'], [/FALABELLA/i, 'Falabella'],
+  [/RIPLEY/i, 'Ripley'], [/\bPARIS\b/i, 'Paris'], [/STARBUCKS/i, 'Starbucks'], [/MC\s*DONALD/i, "McDonald's"],
+  [/DOGGIS/i, 'Doggis'], [/JUAN\s*MAESTRO/i, 'Juan Maestro'], [/CINEMARK/i, 'Cinemark'], [/OK\s*MARKET/i, 'OK Market'],
+  [/OXXO/i, 'OXXO'], [/PRONTO\s*COPEC/i, 'Pronto Copec'], [/ANT[AÁ]RTICA/i, 'Librería Antártica'], [/PREUNIC/i, 'Preunic'],
+];
+
+const IGNORAR = /BOLETA|ELECTR|R\.?\s?U\.?\s?T|SII|GIRO|FACTURA|FECHA|HORA|DIRECCI|CASA MATRIZ|SUCURSAL|TEL[EÉ]F|FONO|CAJA|CAJERO|TOTAL|NETO|IVA|VUELTO|EFECTIVO|TARJETA|TIMBRE|VERIFIQUE|WWW|\.CL|@/i;
+function esNombre(l) {
+  const letras = (l.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+  const digitos = (l.match(/\d/g) || []).length;
+  return l.length >= 3 && l.length <= 45 && letras >= 3 && letras / l.length >= 0.55 && digitos <= 3 && !IGNORAR.test(l);
+}
+function limpiarNombre(l) {
+  return l.replace(/[^\wÁÉÍÓÚÑáéíóúñ&.'\- ]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+    .replace(/(^|\s)(\p{L})/gu, (m, a, b) => a + b.toUpperCase())
+    .replace(/\b(S\.?a\.?|Spa|Ltda\.?|Eirl)$/i, m => m.toUpperCase());
+}
+
 // Extrae monto total, fecha, RUT, folio y comercio desde el texto OCR.
 export function interpretar(texto) {
   const lineas = texto.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -80,10 +102,17 @@ export function interpretar(texto) {
   const mfo = texto.match(/(?:FOLIO|BOLETA[^\n\d]{0,30}N[°ºo.]?|N[°º]\s*)\s*:?\s*(\d{3,12})/i);
   if (mfo) out.folio = mfo[1];
 
-  // Comercio: primera línea "con letras" que no sea encabezado tributario
-  const ignorar = /BOLETA|ELECTR|R\.?U\.?T|SII|GIRO|FACTURA|FECHA|DIRECCI|CASA MATRIZ|TEL|^\W+$/i;
-  const nombre = lineas.find(l => /[A-Za-zÁÉÍÓÚÑ]{3,}/.test(l) && !ignorar.test(l) && l.length <= 40);
-  if (nombre) out.comercio = nombre.replace(/[^\wÁÉÍÓÚÑáéíóúñ&.\- ]/g, '').replace(/\s+/g, ' ').trim();
+  // Comercio: 1) marca conocida en cualquier parte del texto, 2) razón social junto al RUT, 3) primera línea legible
+  const marca = MARCAS.find(([re]) => re.test(texto));
+  if (marca) out.comercio = marca[1];
+  else {
+    const iRut = lineas.findIndex(l => /R\.?\s?U\.?\s?T/i.test(l) || /\d{1,2}\.?\d{3}\.?\d{3}\s*-\s*[\dkK]/.test(l));
+    const cercanas = iRut > 0 ? [lineas[iRut - 1], lineas[iRut - 2]] : [];
+    const candidatas = [...cercanas, ...lineas.slice(0, 8)].filter(Boolean).filter(esNombre);
+    const social = candidatas.find(l => /\b(S\.?A\.?|SPA|LTDA|LIMITADA|E\.?I\.?R\.?L)\b/i.test(l));
+    const elegido = social || candidatas[0];
+    if (elegido) out.comercio = limpiarNombre(elegido);
+  }
 
   return out;
 }
