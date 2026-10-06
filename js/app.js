@@ -42,6 +42,28 @@ function deltaChip(v, { invertir = false } = {}) {
   return `<span class="delta ${malo ? 'pos' : 'neg'}">${v > 0 ? '▲' : '▼'} ${pct(v).replace('+', '')}</span>`;
 }
 
+// Confirmación dentro de la página. Devuelve el texto ingresado ('' si no hay campo) o null si se cancela.
+function dialogo({ titulo, texto, campo, ok = 'Aceptar', peligro = false }) {
+  return new Promise(resolve => {
+    const fondo = el('dialogo');
+    el('dlg-titulo').textContent = titulo;
+    el('dlg-texto').textContent = texto || '';
+    const wrap = el('dlg-campo-wrap'), input = el('dlg-campo');
+    wrap.hidden = !campo;
+    el('dlg-campo-label').textContent = campo || '';
+    input.value = '';
+    const btnOk = el('dlg-ok');
+    btnOk.textContent = ok;
+    btnOk.className = peligro ? 'btn-primary btn-danger' : 'btn-primary';
+    fondo.hidden = false;
+    (campo ? input : btnOk).focus();
+    const fin = v => { fondo.hidden = true; btnOk.onclick = el('dlg-cancelar').onclick = fondo.onkeydown = null; resolve(v); };
+    btnOk.onclick = () => fin(campo ? input.value.trim() : '');
+    el('dlg-cancelar').onclick = () => fin(null);
+    fondo.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); fin(null); } if (e.key === 'Enter' && campo) fin(input.value.trim()); };
+  });
+}
+
 function toast(msg, ms = 2600) {
   const t = el('toast');
   t.textContent = msg;
@@ -779,7 +801,7 @@ function drillGasto(id) {
       body.querySelector('#d-img')?.addEventListener('click', e => e.target.classList.toggle('zoom'));
       body.querySelector('#d-editar')?.addEventListener('click', () => { cerrar(); editar(g); });
       body.querySelector('#d-anular')?.addEventListener('click', async () => {
-        const motivo = prompt('Motivo de la anulación (queda en la bitácora):');
+        const motivo = await dialogo({ titulo: 'Anular gasto', texto: 'El registro se excluye de los indicadores pero queda en la bitácora para auditoría.', campo: 'Motivo de la anulación', ok: 'Anular', peligro: true });
         if (motivo == null) return;
         g.anulado = true; g.motivoAnulacion = motivo || 'Sin motivo';
         await registrarCambio(g, 'Anulado', [], motivo);
@@ -1084,7 +1106,7 @@ async function importarJSON(e) {
   try {
     const data = JSON.parse(await f.text());
     if (data.app !== 'pupo-gastos' || !Array.isArray(data.gastos)) throw new Error('Archivo no reconocido');
-    if (!confirm(`Restaurar ${data.gastos.length} gastos y ${data.imagenes?.length || 0} fotos? Los registros con el mismo ID se sobrescriben.`)) return;
+    if (await dialogo({ titulo: 'Restaurar respaldo', texto: `Se restaurarán ${data.gastos.length} gastos y ${data.imagenes?.length || 0} fotos. Los registros con el mismo ID se sobrescriben.`, ok: 'Restaurar' }) == null) return;
     for (const i of data.imagenes || []) await db.put('imagenes', { id: i.id, hash: i.hash, w: i.w, h: i.h, creado: i.creado, blob: await dataURLToBlob(i.data) });
     for (const g of data.gastos) await db.put('gastos', g);
     if (data.ajustes?.presupuestos) await setAjuste('presupuestos', data.ajustes.presupuestos);
@@ -1144,7 +1166,7 @@ async function boletaFalsa(g) {
 }
 
 async function cargarDemo() {
-  if (S.gastos.some(g => g.demo) && !confirm('Ya hay datos demo cargados. ¿Agregar otro lote?')) return;
+  if (S.gastos.some(g => g.demo) && await dialogo({ titulo: 'Datos demo', texto: 'Ya hay datos demo cargados. ¿Agregar otro lote?', ok: 'Agregar' }) == null) return;
   toast('Generando datos demo…', 6000);
   const fin = hoy(), ini = addDays(fin, -183);
   let seq = S.gastos.reduce((m, x) => Math.max(m, x.seq || 0), 0);
@@ -1186,7 +1208,7 @@ async function cargarDemo() {
 async function borrarDemo() {
   const demo = S.gastos.filter(g => g.demo);
   if (!demo.length) return toast('No hay datos demo');
-  if (!confirm(`Eliminar ${demo.length} gastos demo? Sus registros reales no se tocan.`)) return;
+  if (await dialogo({ titulo: 'Eliminar datos demo', texto: `Se eliminarán ${demo.length} gastos demo. Sus registros reales no se tocan.`, ok: 'Eliminar', peligro: true }) == null) return;
   for (const g of demo) {
     if (g.imagenId) { await db.del('imagenes', g.imagenId); urlCache.delete(g.imagenId); }
     await db.del('gastos', g.id);
