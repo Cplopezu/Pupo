@@ -27,7 +27,7 @@
       <button class="tab" data-view="ajustes" role="tab">Ajustes</button>
     </nav>
     <div class="status">
-      <span class="dot-live"></span>
+      <button class="nube-ind" id="nube-ind" type="button" title="Estado de la nube">● Solo en este equipo</button>
       <span id="clock" class="mono">--:--:--</span>
     </div>
   </header>
@@ -199,7 +199,11 @@
     <!-- AJUSTES -->
     <section class="view" id="view-ajustes">
       <div class="grid-ajustes">
-        <div class="panel">
+        <div class="panel panel-nube" id="panel-nube">
+          <header class="panel-head"><h2>Cuenta y nube</h2><span class="hint" id="nube-estado-txt"></span></header>
+          <div id="nube-cuerpo"></div>
+        </div>
+        <div class="panel panel-ppto">
           <header class="panel-head"><h2>Presupuesto mensual por categoría</h2></header>
           <p class="muted small">Base para el control de consumo y la proyección de cierre.</p>
           <div id="presupuestos" class="fields"></div>
@@ -207,7 +211,7 @@
         </div>
         <div class="panel">
           <header class="panel-head"><h2>Respaldo y exportación</h2></header>
-          <p class="muted small">Los datos y fotos se guardan en este dispositivo. Exporte un respaldo periódicamente.</p>
+          <p class="muted small">Copia completa de sus gastos y fotos en un archivo, para guardar o pasar a otro equipo.</p>
           <div class="stack">
             <button class="btn-ghost" id="btn-export-json">Descargar respaldo completo (.json con fotos)</button>
             <button class="btn-ghost" id="btn-export-csv">Exportar libro a Excel (.csv)</button>

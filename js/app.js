@@ -10,6 +10,10 @@ import {
 } from './analisis.js';
 import { lineChart, barChart, sparkline } from './charts.js';
 import { leerBoleta } from './ocr.js';
+import {
+  iniciarNube, nubeEstado, nubeEmail, alCambiar, sincronizar, entrar, registrarse, salir, unirseALibro,
+  renombrarLibro, guardarConfigNube, configNube, bajarFoto, contarPendientesNube,
+} from './nube.js';
 
 /* ============================================================
    Configuración
@@ -135,6 +139,8 @@ async function init() {
   bindDelegados();
   reloj();
   render();
+  bindNube();
+  iniciarNube().then(() => sincronizarYRefrescar());
   let ancho = window.innerWidth;
   window.addEventListener('resize', () => {
     clearTimeout(init._r);
@@ -161,14 +167,184 @@ async function revisarAlmacen() {
   let html = '';
   if (dentroDeOtraApp) {
     html = '<b>Está abriendo Pupo dentro de otra aplicación</b> (WhatsApp, correo, redes). Lo que registre aquí se pierde. Ábrala en Safari o Chrome y agréguela a la pantalla de inicio.';
-  } else if (esIOS && !instalada()) {
+  } else if (esIOS && !instalada() && !nubeEstado().email) {
     html = '<b>Está usando Pupo desde el navegador.</b> En iPhone, estos datos se guardan aparte de la app de la pantalla de inicio y Safari puede borrarlos tras 7 días sin uso. Toque <b>Compartir → Agregar a pantalla de inicio</b> y use siempre ese ícono.';
+  } else if (nubeEstado().email && nubeEstado().fase !== 'error') {
+    html = '';
   } else if (reales >= 5 && (dias == null || dias >= 14)) {
     html = `<b>${dias == null ? 'Aún no tiene un respaldo.' : `Su último respaldo es de hace ${dias} días.`}</b> Sus ${reales} gastos viven solo en este dispositivo. Descargue un respaldo en Ajustes.`;
   }
   aviso.hidden = !html;
   if (html) aviso.innerHTML = `<span class="ico">⚠</span><span class="txt">${html}</span>${reales >= 5 && !dentroDeOtraApp ? '<button class="btn-ghost" data-goto-respaldo>Respaldar</button>' : ''}`;
   aviso.querySelector('[data-goto-respaldo]')?.addEventListener('click', () => irA('ajustes'));
+}
+
+/* ============================================================
+   Nube: indicador, sincronización automática y panel de cuenta
+   ============================================================ */
+async function sincronizarYRefrescar() {
+  const res = await sincronizar();
+  if (res.cambios) {
+    await cargar();
+    actualizarDatalist();
+    render();
+    if (pila.length) pintarDrawer();
+  }
+  return res;
+}
+
+function programarSync(ms = 1500) {
+  contarPendientesNube();
+  clearTimeout(programarSync._t);
+  programarSync._t = setTimeout(sincronizarYRefrescar, ms);
+}
+
+function pintarIndicador(e) {
+  const b = el('nube-ind');
+  let txt = '● Solo en este equipo', cls = '';
+  if (e.fase === 'sincronizando') { txt = '↻ Sincronizando…'; cls = 'sync'; }
+  else if (e.fase === 'conectada') { txt = e.pendientes ? `☁ ${e.pendientes} por subir` : '☁ Sincronizado'; cls = e.pendientes ? 'warn' : 'ok'; }
+  else if (e.fase === 'sin-sesion') { txt = '☁ Iniciar sesión'; cls = 'warn'; }
+  else if (e.fase === 'error') { txt = e.email ? '⚠ Sin sincronizar' : '⚠ Nube no disponible'; cls = 'warn'; }
+  b.textContent = txt;
+  b.className = 'nube-ind ' + cls;
+  b.title = e.error || (e.ultima ? `Última sincronización: ${fechaHora(e.ultima)}` : 'Estado de la nube');
+}
+
+function bindNube() {
+  alCambiar(e => {
+    pintarIndicador(e);
+    revisarAlmacen();
+    if (el('view-ajustes').classList.contains('is-active') && !el('panel-nube').contains(document.activeElement)) renderNube();
+  });
+  pintarIndicador(nubeEstado());
+  el('nube-ind').addEventListener('click', () => irA('ajustes'));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') programarSync(300); });
+  window.addEventListener('online', () => programarSync(300));
+  setInterval(() => { if (document.visibilityState === 'visible') sincronizarYRefrescar(); }, 120000);
+}
+
+let nubeMsg = null; // { tipo: 'ok'|'err', texto }
+async function renderNube() {
+  const e = nubeEstado();
+  const cfg = await configNube();
+  const msg = nubeMsg ? `<div class="nube-msg ${nubeMsg.tipo}">${esc(nubeMsg.texto)}</div>` : '';
+  let html = '';
+  el('nube-estado-txt').textContent = e.fase === 'conectada' ? (e.ultima ? `Sincronizado ${fechaHora(e.ultima)}` : 'Conectado') : '';
+  if (!cfg) {
+    html = `<div class="nube-grid">
+      <div class="nube-box">
+        <p class="muted small" style="margin:0">Hoy sus gastos están solo en este equipo. Conecte la nube para tenerlos a salvo, usarlos en el celular y el computador, y compartir un libro con otra persona.</p>
+        <p class="muted small" style="margin:0">Necesita un proyecto gratuito en <b>supabase.com</b>. La guía paso a paso está en el archivo <b>GUIA-NUBE.md</b> del proyecto.</p>
+      </div>
+      <div class="nube-box">
+        <label class="field"><span>URL del proyecto</span><input type="text" id="nube-url" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>Clave pública (anon)</span><input type="text" id="nube-key" placeholder="eyJhbGciOi…" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        ${msg}
+        <div class="row"><button class="btn-primary" id="nube-conectar">Conectar</button></div>
+      </div></div>`;
+  } else if (!e.email) {
+    html = `<div class="nube-grid">
+      <div class="nube-box">
+        <p class="muted small" style="margin:0">Entre con su cuenta para sincronizar. Si es la primera vez, use <b>Crear cuenta</b>: le llegará un correo para confirmarla.</p>
+        ${e.fase === 'error' && e.error ? `<div class="nube-msg err">${esc(e.error)}</div>` : ''}
+        ${cfg.desdeAjustes ? '<button class="btn-ghost" id="nube-desconectar" style="align-self:flex-start">Cambiar proyecto de nube</button>' : ''}
+      </div>
+      <div class="nube-box">
+        <label class="field"><span>Correo</span><input type="email" id="nube-email" autocomplete="username" autocapitalize="off" inputmode="email"></label>
+        <label class="field"><span>Contraseña</span><input type="password" id="nube-clave" autocomplete="current-password" minlength="6"></label>
+        ${msg}
+        <div class="row"><button class="btn-primary" id="nube-entrar">Entrar</button><button class="btn-ghost" id="nube-registrar">Crear cuenta</button></div>
+      </div></div>`;
+  } else {
+    const l = e.libro || {};
+    html = `<div class="nube-grid">
+      <div class="nube-box">
+        <h3>Su cuenta</h3>
+        <div>${esc(e.email)}</div>
+        <div class="muted small">${e.pendientes ? `${e.pendientes} cambios por subir` : 'Todo sincronizado'}${e.ultima ? ` · última vez ${fechaHora(e.ultima)}` : ''}</div>
+        ${e.fase === 'error' && e.error ? `<div class="nube-msg err">${esc(e.error)}</div>` : ''}
+        <div class="row"><button class="btn-primary" id="nube-sync">Sincronizar ahora</button><button class="btn-ghost" id="nube-salir">Cerrar sesión</button></div>
+      </div>
+      <div class="nube-box">
+        <h3>Libro de gastos</h3>
+        <div class="row"><input type="text" id="nube-libro-nombre" value="${esc(l.nombre || '')}" aria-label="Nombre del libro"><button class="btn-ghost" id="nube-renombrar">Renombrar</button></div>
+        <div class="muted small">${l.miembros > 1 ? `Compartido entre ${l.miembros} personas` : 'Solo usted'}</div>
+      </div>
+      <div class="nube-box">
+        <h3>Invitar a otra persona</h3>
+        <div class="codigo" id="nube-codigo">${esc(l.codigo || '—')}</div>
+        <div class="muted small">Pídale que instale la app, cree su cuenta y escriba este código en <b>Unirse a un libro</b>. Verán y registrarán los mismos gastos.</div>
+        <div class="row"><button class="btn-ghost" id="nube-copiar">Copiar código</button></div>
+      </div>
+      <div class="nube-box">
+        <h3>Unirse a un libro</h3>
+        <div class="row"><input type="text" id="nube-unirse-cod" placeholder="Código de 8 letras" autocapitalize="characters" maxlength="8"><button class="btn-ghost" id="nube-unirse">Unirse</button></div>
+        <div class="muted small">Los gastos registrados en este equipo se sumarán a ese libro.</div>
+        ${msg}
+      </div></div>`;
+  }
+  el('nube-cuerpo').innerHTML = html;
+  nubeMsg = null;
+  bindPanelNube();
+}
+
+async function accionNube(btn, fn) {
+  btn.disabled = true;
+  try { await fn(); } catch (err) { nubeMsg = { tipo: 'err', texto: err.message || String(err) }; }
+  btn.disabled = false;
+  renderNube();
+}
+
+function bindPanelNube() {
+  const on = (id, fn) => el(id)?.addEventListener('click', e => accionNube(e.currentTarget, fn));
+  on('nube-conectar', async () => {
+    const url = el('nube-url').value.trim(), key = el('nube-key').value.trim();
+    if (!/^https:\/\/.+/.test(url) || key.length < 20) throw new Error('Revise la URL (empieza con https://) y la clave pública.');
+    const e = await guardarConfigNube(url, key);
+    if (e.fase === 'error') throw new Error(e.error);
+    nubeMsg = { tipo: 'ok', texto: 'Conectado. Ahora entre o cree su cuenta.' };
+  });
+  on('nube-desconectar', async () => { await guardarConfigNube('', ''); });
+  const credenciales = () => {
+    const email = el('nube-email').value.trim(), clave = el('nube-clave').value;
+    if (!email || !clave) throw new Error('Escriba su correo y contraseña.');
+    return [email, clave];
+  };
+  on('nube-entrar', async () => {
+    await entrar(...credenciales());
+    toast('✔ Sesión iniciada. Sincronizando…');
+    await sincronizarYRefrescar();
+  });
+  on('nube-registrar', async () => {
+    const r = await registrarse(...credenciales());
+    if (r.confirmar) nubeMsg = { tipo: 'ok', texto: 'Cuenta creada. Abra el correo que le enviamos, confirme, y vuelva aquí a pulsar "Entrar".' };
+    else { toast('✔ Cuenta creada. Sincronizando…'); await sincronizarYRefrescar(); }
+  });
+  on('nube-sync', async () => {
+    const r = await sincronizarYRefrescar();
+    if (r.ok) toast('✔ Sincronizado'); else if (r.error) throw new Error(r.error);
+  });
+  on('nube-salir', async () => {
+    const ok = await dialogo({ titulo: 'Cerrar sesión', texto: 'Sus gastos quedan en este equipo y en la nube. Los cambios que haga sin sesión se subirán cuando vuelva a entrar.', ok: 'Cerrar sesión' });
+    if (ok == null) return;
+    await salir();
+  });
+  on('nube-renombrar', async () => { await renombrarLibro(el('nube-libro-nombre').value.trim() || 'Mis gastos'); toast('✔ Libro renombrado'); });
+  on('nube-copiar', async () => {
+    const cod = el('nube-codigo').textContent;
+    try { await navigator.clipboard.writeText(cod); toast('✔ Código copiado'); }
+    catch { const r = document.createRange(); r.selectNodeContents(el('nube-codigo')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Código seleccionado: cópielo'); }
+  });
+  on('nube-unirse', async () => {
+    const cod = el('nube-unirse-cod').value.trim();
+    if (cod.length < 6) throw new Error('Escriba el código completo.');
+    const ok = await dialogo({ titulo: 'Unirse a un libro', texto: 'Desde ahora este equipo trabajará en el libro compartido, y los gastos registrados aquí se sumarán a él.', ok: 'Unirme' });
+    if (ok == null) return;
+    const l = await unirseALibro(cod);
+    nubeMsg = { tipo: 'ok', texto: `Ahora está en el libro "${l.nombre}".` };
+    await sincronizarYRefrescar();
+  });
 }
 
 function reloj() {
@@ -387,8 +563,14 @@ const blobDe = r => r.blob || new Blob([r.buf], { type: r.type || 'image/jpeg' }
 const urlCache = new Map();
 async function urlImagen(id) {
   if (urlCache.has(id)) return urlCache.get(id);
-  const r = await db.get('imagenes', id);
-  if (!r) return null;
+  let r = await db.get('imagenes', id);
+  if (!r) {
+    // foto registrada en otro equipo: se descarga de la nube y queda guardada aquí
+    const blob = await bajarFoto(id);
+    if (!blob) return null;
+    await guardarImagen({ id, creado: Date.now() }, blob);
+    r = { blob };
+  }
   const u = URL.createObjectURL(blobDe(r));
   urlCache.set(id, u);
   return u;
@@ -869,11 +1051,11 @@ function drillGasto(id) {
             <dt>Documento</dt><dd>${esc(g.documento || '—')}${g.folio ? ' N° ' + esc(g.folio) : ''}</dd>
             <dt>RUT emisor</dt><dd class="mono">${esc(g.rut || '—')}</dd>
             <dt>Notas</dt><dd>${esc(g.notas || '—')}</dd>
-            <dt>Registrado</dt><dd>${g.creado ? fechaHora(g.creado) : '—'}</dd>
+            <dt>Registrado</dt><dd>${g.creado ? fechaHora(g.creado) : '—'}${g.registradoPor ? ` · ${esc(g.registradoPor)}` : ''}</dd>
             <dt>Última modificación</dt><dd>${g.modificado ? fechaHora(g.modificado) : '—'}</dd>
             ${g.imagenHash ? `<dt>Huella SHA-256</dt><dd><span class="hash">${g.imagenHash}</span><br><button class="btn-ghost" id="d-verificar" style="margin-top:6px;padding:6px 10px;font-size:12px">Verificar integridad de la foto</button> <span id="d-verif" class="small"></span></dd>` : ''}
           </dl>`
-        + sec('Bitácora de cambios') + `<ul class="timeline">${hist.map(h => `<li><div class="when">${fechaHora(h.ts)}</div><div><b>${esc(h.accion)}</b></div>${(h.cambios || []).map(c => `<div class="chg">${esc(c.campo)}: <s>${esc(c.antes)}</s> → ${esc(c.despues)}</div>`).join('')}${h.detalle ? `<div class="chg">${esc(h.detalle)}</div>` : ''}</li>`).join('') || '<li>Sin registros</li>'}</ul>`;
+        + sec('Bitácora de cambios') + `<ul class="timeline">${hist.map(h => `<li><div class="when">${fechaHora(h.ts)}${h.por ? ` · ${esc(h.por)}` : ''}</div><div><b>${esc(h.accion)}</b></div>${(h.cambios || []).map(c => `<div class="chg">${esc(c.campo)}: <s>${esc(c.antes)}</s> → ${esc(c.despues)}</div>`).join('')}${h.detalle ? `<div class="chg">${esc(h.detalle)}</div>` : ''}</li>`).join('') || '<li>Sin registros</li>'}</ul>`;
     },
     montar(body) {
       const g = S.gastos.find(x => x.id === id);
@@ -904,8 +1086,9 @@ function drillGasto(id) {
 
 async function registrarCambio(g, accion, cambios, detalle) {
   g.modificado = Date.now();
-  g.historial = [...(g.historial || []), { ts: g.modificado, accion, cambios, detalle }];
+  g.historial = [...(g.historial || []), { ts: g.modificado, accion, cambios, detalle, por: nubeEmail() || undefined }];
   await db.put('gastos', g);
+  programarSync();
 }
 
 /* ============================================================
@@ -1158,8 +1341,9 @@ async function guardarGasto() {
     toast(`✔ ${folio(g)} actualizado`);
   } else {
     const seq = S.gastos.reduce((m, x) => Math.max(m, x.seq || 0), 0) + 1;
-    g = { id: uid(), seq, ...d, imagenId, imagenHash, creado: ahora, modificado: ahora, historial: [{ ts: ahora, accion: 'Creado', detalle: imagenId ? 'Con foto de boleta' : 'Sin foto' }] };
+    g = { id: uid(), seq, ...d, imagenId, imagenHash, creado: ahora, modificado: ahora, historial: [{ ts: ahora, accion: 'Creado', detalle: imagenId ? 'Con foto de boleta' : 'Sin foto', por: nubeEmail() || undefined }], registradoPor: nubeEmail() || undefined };
     await db.put('gastos', g);
+    programarSync();
     S.gastos.push(g);
     toast(`✔ Gasto ${folio(g)} registrado · ${$(g.monto)}`);
   }
@@ -1204,6 +1388,8 @@ function bindAjustes() {
     el('presupuestos').querySelectorAll('input').forEach(i => { const v = parseMonto(i.value); if (v > 0) p[i.dataset.cat] = v; });
     S.presupuestos = p;
     await setAjuste('presupuestos', p);
+    await setAjuste('presupuestosAt', Date.now());
+    programarSync(300);
     toast('✔ Presupuesto guardado');
     renderAjustes();
   });
@@ -1215,6 +1401,7 @@ function bindAjustes() {
 }
 
 async function renderAjustes() {
+  renderNube();
   const tot = Object.values(S.presupuestos).reduce((s, v) => s + (+v || 0), 0);
   el('presupuestos').innerHTML = S.categorias.map(c => `
     <label class="field"><span><i class="swatch" style="background:${colorCat(c)}"></i>${esc(c)}</span>
@@ -1257,10 +1444,10 @@ async function importarJSON(e) {
     if (data.app !== 'pupo-gastos' || !Array.isArray(data.gastos)) throw new Error('Archivo no reconocido');
     if (await dialogo({ titulo: 'Restaurar respaldo', texto: `Se restaurarán ${data.gastos.length} gastos y ${data.imagenes?.length || 0} fotos. Los registros con el mismo ID se sobrescriben.`, ok: 'Restaurar' }) == null) return;
     for (const i of data.imagenes || []) await db.put('imagenes', { id: i.id, hash: i.hash, w: i.w, h: i.h, creado: i.creado, blob: await dataURLToBlob(i.data) });
-    for (const g of data.gastos) await db.put('gastos', g);
+    for (const g of data.gastos) { delete g.syncAt; delete g.imagenNube; await db.put('gastos', g); }
     if (data.ajustes?.presupuestos) await setAjuste('presupuestos', data.ajustes.presupuestos);
     if (data.ajustes?.categorias) await setAjuste('categorias', data.ajustes.categorias);
-    await cargar(); poblarSelects(); render();
+    await cargar(); poblarSelects(); render(); programarSync(300);
     toast(`✔ Respaldo restaurado: ${data.gastos.length} gastos`);
   } catch (err) {
     toast('⚠ No se pudo restaurar: ' + err.message, 4000);

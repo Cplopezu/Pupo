@@ -9,7 +9,7 @@ const leer = f => readFileSync(join(raiz, f), 'utf8');
 const salida = process.argv[2] || join(raiz, 'pupo-gastos.html');
 
 // Orden de dependencias: cada módulo después de lo que importa.
-const modulos = ['js/util.js', 'js/db.js', 'js/analisis.js', 'js/charts.js', 'js/ocr.js', 'js/app.js'];
+const modulos = ['js/util.js', 'js/db.js', 'js/config.js', 'js/analisis.js', 'js/charts.js', 'js/ocr.js', 'js/nube.js', 'js/app.js'];
 const js = modulos.map(f => `// ---- ${f}\n` + leer(f)
   .replace(/^import[\s\S]*?from\s+'[^']+';[ \t]*\n/gm, '')
   .replace(/^export (?=(async )?(function|const|let|class))/gm, '')

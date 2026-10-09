@@ -65,8 +65,10 @@ Publicar la carpeta en cualquier hosting estático con HTTPS, por ejemplo **GitH
 
 ## Dónde quedan los datos
 
-Todo se guarda en el **propio dispositivo** (IndexedDB del navegador); nada se envía a terceros. La única conexión externa es la descarga del motor OCR (Tesseract.js) y las fuentes, la primera vez.
-Por eso conviene **descargar el respaldo `.json` periódicamente** (Ajustes) y, si usa la app en más de un dispositivo, restaurar ese respaldo en el otro. Una sincronización en la nube (p. ej. Supabase o Firebase) sería la siguiente etapa natural.
+- **Sin nube** (por defecto): todo se guarda en el propio dispositivo (IndexedDB). Conviene descargar el respaldo `.json` periódicamente desde Ajustes.
+- **Con nube** (opcional, Supabase gratuito): los gastos y fotos se sincronizan con su cuenta, se usan en varios equipos y un libro se puede **compartir con otra persona** mediante un código de invitación. La app sigue funcionando sin conexión y sube los cambios cuando vuelve la señal. Cada gasto y cambio queda firmado con el correo de quien lo hizo, y las reglas de la base de datos impiden borrar gastos.
+
+Para activarla, siga **[GUIA-NUBE.md](GUIA-NUBE.md)**. La estructura y las reglas de seguridad de la base de datos están en `supabase/schema.sql`.
 
 ## Estructura
 
@@ -78,6 +80,9 @@ js/analisis.js        Períodos, agregaciones y descomposición de variaciones
 js/charts.js          Gráficos SVG (líneas con crosshair, barras, sparklines)
 js/ocr.js             OCR de boletas e interpretación de montos/fecha/RUT/folio chilenos
 js/db.js              Persistencia en IndexedDB
+js/nube.js            Cuenta, libros compartidos y sincronización con Supabase
+js/config.js          URL y clave pública de la nube (opcional)
+supabase/schema.sql   Tablas y reglas de seguridad de la nube
 js/util.js            Formato CLP, fechas, compresión de imágenes, SHA-256
 sw.js                 Service worker (funciona sin conexión)
 tests/                Pruebas de la lógica (npm test)
