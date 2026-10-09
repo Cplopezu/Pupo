@@ -124,7 +124,8 @@ async function migrarKakebo() {
 
 async function init() {
   await cargar();
-  pedirPersistencia();
+  S.persistente = await pedirPersistencia();
+  revisarAlmacen();
   poblarSelects();
   bindNav();
   bindForm();
@@ -142,6 +143,32 @@ async function init() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+}
+
+/* ============================================================
+   Protección de datos: dónde se está usando la app y respaldos
+   ============================================================ */
+const ua = navigator.userAgent;
+const esIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const instalada = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+const dentroDeOtraApp = /FBAN|FBAV|Instagram|WhatsApp|GSA\/|Line\/|LinkedInApp|Twitter/i.test(ua);
+
+async function revisarAlmacen() {
+  const aviso = el('aviso-almacen');
+  const reales = S.gastos.filter(g => !g.demo).length;
+  const ultimo = await getAjuste('ultimoRespaldo', null);
+  const dias = ultimo ? Math.floor((Date.now() - ultimo) / 86400000) : null;
+  let html = '';
+  if (dentroDeOtraApp) {
+    html = '<b>Está abriendo Pupo dentro de otra aplicación</b> (WhatsApp, correo, redes). Lo que registre aquí se pierde. Ábrala en Safari o Chrome y agréguela a la pantalla de inicio.';
+  } else if (esIOS && !instalada()) {
+    html = '<b>Está usando Pupo desde el navegador.</b> En iPhone, estos datos se guardan aparte de la app de la pantalla de inicio y Safari puede borrarlos tras 7 días sin uso. Toque <b>Compartir → Agregar a pantalla de inicio</b> y use siempre ese ícono.';
+  } else if (reales >= 5 && (dias == null || dias >= 14)) {
+    html = `<b>${dias == null ? 'Aún no tiene un respaldo.' : `Su último respaldo es de hace ${dias} días.`}</b> Sus ${reales} gastos viven solo en este dispositivo. Descargue un respaldo en Ajustes.`;
+  }
+  aviso.hidden = !html;
+  if (html) aviso.innerHTML = `<span class="ico">⚠</span><span class="txt">${html}</span>${reales >= 5 && !dentroDeOtraApp ? '<button class="btn-ghost" data-goto-respaldo>Respaldar</button>' : ''}`;
+  aviso.querySelector('[data-goto-respaldo]')?.addEventListener('click', () => irA('ajustes'));
 }
 
 function reloj() {
@@ -1195,7 +1222,8 @@ async function renderAjustes() {
     + `<div class="field field-full"><span>Total mensual</span><div class="mono" style="font-size:22px;font-weight:700">${$(tot)}</div></div>`;
   const u = await estimarUso();
   const nImg = (await db.all('imagenes')).length;
-  el('storage-info').innerHTML = `${S.gastos.length} gastos · ${nImg} fotos${u ? ` · ${(u.usage / 1048576).toFixed(1)} MB usados de ${(u.quota / 1073741824).toFixed(1)} GB disponibles` : ''}`;
+  const ultimo = await getAjuste('ultimoRespaldo', null);
+  el('storage-info').innerHTML = `Modo: ${instalada() ? 'app instalada ✔' : 'navegador'} · Guardado protegido: ${S.persistente ? 'sí ✔' : 'no garantizado'} · Último respaldo: ${ultimo ? fechaHora(ultimo) : 'nunca'}<br>${S.gastos.length} gastos · ${nImg} fotos${u ? ` · ${(u.usage / 1048576).toFixed(1)} MB usados de ${(u.quota / 1073741824).toFixed(1)} GB disponibles` : ''}`;
 }
 
 async function exportarJSON() {
@@ -1205,6 +1233,8 @@ async function exportarJSON() {
   for (const i of imgs) imagenes.push({ id: i.id, hash: i.hash, w: i.w, h: i.h, creado: i.creado, data: await blobToDataURL(blobDe(i)) });
   const payload = { app: 'pupo-gastos', version: 1, exportado: new Date().toISOString(), ajustes: { categorias: S.categorias, presupuestos: S.presupuestos }, gastos: S.gastos, imagenes };
   descargar(`pupo-respaldo-${hoy()}.json`, JSON.stringify(payload), 'application/json');
+  await setAjuste('ultimoRespaldo', Date.now());
+  revisarAlmacen();
 }
 
 function exportarCSV() {
