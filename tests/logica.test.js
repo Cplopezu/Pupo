@@ -24,7 +24,7 @@ SUBTOTAL              3.540
 TOTAL               $ 3.540
 EFECTIVO              5.000
 VUELTO                1.460`;
-  const r = interpretar(txt);
+  const r = interpretar(txt, new Date(2026, 9, 6));
   assert.equal(r.monto, 3540);
   assert.equal(r.fecha, '2026-10-03');
   assert.equal(r.rut, '76.543.210-K');
@@ -111,4 +111,28 @@ test('cartola: limpia nombres de comercio bancarios', () => {
   assert.equal(limpiarComercio('COPEC APP SANTIAGO'), 'Copec');
   assert.equal(limpiarComercio('TUU*KADITEC NUNOA'), 'Kaditec');
   assert.equal(limpiarComercio('CAFE DEL PARQUE SPA SANTIAGO'), 'Cafe Del Parque SPA');
+});
+
+test('boleta Copec: fecha en formato año-mes-día y folio "Boleta Electronica:"', () => {
+  const txt = `COPEC
+RUT : 76346660-4
+R.Social : COMERCIAL F Y H LIMITADA
+Boleta Electronica: 3970382
+Fecha Emision : 2026-10-09/09:12:09
+Nro. transaccion: 604190000002827834
+Gasolina 93 9.954 Lt 1507 $ 15.000
+SUBTOTAL $ 15.000
+TOTAL $ 15.000
+TOTAL A PAGAR $ 15.000`;
+  const r = interpretar(txt, new Date(2026, 9, 9));
+  assert.equal(r.fecha, '2026-10-09');
+  assert.equal(r.monto, 15000);
+  assert.equal(r.folio, '3970382');
+  assert.equal(r.comercio, 'Copec');
+  assert.equal(r.rut, '76.346.660-4');
+});
+
+test('fechas imposibles o muy antiguas no se aceptan', () => {
+  assert.equal(interpretar('TOTAL 1.000\nFECHA 31/02/2026', new Date(2026, 9, 9)).fecha, undefined);
+  assert.equal(interpretar('TOTAL 1.000\nFECHA 10/09/2009', new Date(2026, 9, 9)).fecha, undefined);
 });

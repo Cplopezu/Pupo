@@ -184,6 +184,20 @@ async function revisarAlmacen() {
   aviso.querySelector('[data-goto-respaldo]')?.addEventListener('click', exportarJSON);
 }
 
+// Gastos registrados hace poco pero con una fecha muy anterior (típico de una fecha mal leída en la boleta)
+const fechaSospechosa = g => !deCartola(g) && g.creado && diffDays(g.fecha, iso(new Date(g.creado))) > 400;
+function avisoFechas() {
+  const sosp = activos().filter(fechaSospechosa);
+  const a = el('aviso-fechas');
+  a.hidden = !sosp.length;
+  if (!sosp.length) return;
+  a.innerHTML = `<span class="ico">⚠</span><span class="txt"><b>${sosp.length === 1 ? 'Un gasto tiene' : `${sosp.length} gastos tienen`} una fecha que parece mal leída</b> (${sosp.slice(0, 3).map(g => `${esc(g.comercio)} · ${fechaLarga(g.fecha)}`).join('; ')}). No aparecen en el mes en curso hasta corregirla.</span><button class="btn-ghost" id="ver-fechas">Revisar</button>`;
+  el('ver-fechas').onclick = () => abrir(sosp.length === 1 ? drillGasto(sosp[0].id) : {
+    kicker: 'REVISAR · FECHAS', titulo: 'Fechas por corregir',
+    html: () => `<div class="insight"><p>Estos gastos se registraron recientemente pero tienen una fecha muy anterior. Abra cada uno, toque <b>Editar</b> y corrija la fecha.</p></div><div class="panel panel-flush">${tablaGastos(activos().filter(fechaSospechosa))}</div>`,
+  });
+}
+
 /* ============================================================
    Nube: indicador, sincronización automática y panel de cuenta
    ============================================================ */
@@ -431,6 +445,7 @@ function renderDashboard() {
   const ctx = contexto();
   const { r, A, B, tA, tB, ppto } = ctx;
   el('periodo-label').textContent = `${r.rotulo} · vs ${r.prevLabel}`;
+  avisoFechas();
 
   // ---- KPIs
   const diario = serieDiaria(A, r.desde, r.hasta);
@@ -1235,6 +1250,7 @@ function limpiarForm() {
   el('btn-guardar').textContent = 'Guardar gasto';
   el('form-alert').hidden = true;
   delete el('form-gasto').dataset.confirmado;
+  delete el('form-gasto').dataset.fechaOk;
   el('ocr-bar').hidden = true;
   document.querySelectorAll('.field.is-ocr').forEach(f => f.classList.remove('is-ocr'));
   delete el('cat-chips').dataset.manual;
@@ -1306,6 +1322,14 @@ async function guardarGasto() {
   const d = leerForm();
   if (!(d.monto > 0)) { avisoForm('Falta el <b>monto</b>. Escríbalo, por ejemplo 12.990.'); el('f-monto').focus(); return; }
   if (!d.fecha) { avisoForm('Falta la <b>fecha</b> del gasto.'); return; }
+  // Fecha muy antigua o futura: casi siempre es una lectura equivocada de la boleta
+  const desfase = diffDays(hoy(), d.fecha);
+  if ((desfase > 2 || desfase < -90) && !el('form-gasto').dataset.fechaOk) {
+    el('form-gasto').dataset.fechaOk = '1';
+    avisoForm(`⚠ La fecha quedó como <b>${fechaLarga(d.fecha)}</b>. ¿Es correcta? Corríjala arriba o pulse <b>Guardar</b> de nuevo para confirmarla.`);
+    el('f-fecha').focus();
+    return;
+  }
   // Sin comercio no se bloquea: queda identificado por RUT o como pendiente, para completarlo después.
   d.comercioPendiente = !d.comercio;
   if (!d.comercio) d.comercio = d.rut ? `RUT ${d.rut}` : 'Por identificar';

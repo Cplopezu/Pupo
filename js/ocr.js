@@ -74,7 +74,7 @@ function limpiarNombre(l) {
 }
 
 // Extrae monto total, fecha, RUT, folio y comercio desde el texto OCR.
-export function interpretar(texto) {
+export function interpretar(texto, hoyRef = new Date()) {
   const lineas = texto.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const out = {};
 
@@ -98,15 +98,28 @@ export function interpretar(texto) {
     if (todos.length) out.monto = Math.max(...todos);
   }
 
-  // Fecha dd/mm/aaaa, dd-mm-aa, dd.mm.aaaa
-  const mf = texto.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
-  if (mf) {
-    let [, d, m, y] = mf.map(Number);
-    if (y < 100) y += 2000;
-    if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 2000 && y <= 2100) {
-      out.fecha = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  // Fecha: acepta aaaa-mm-dd (ej. Copec "2026-10-09/09:12") y dd/mm/aaaa, dd-mm-aa, dd.mm.aaaa.
+  // Solo se aceptan fechas reales y plausibles (último año y medio, no futuras); se prefiere la línea "Fecha".
+  const plausible = (y, m, d) => {
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+    const f = new Date(y, m - 1, d);
+    if (f.getMonth() !== m - 1) return null;
+    const dias = (hoyRef - f) / 86400000;
+    return dias >= -2 && dias <= 550 ? `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null;
+  };
+  const fechas = [];
+  lineas.forEach((l, i) => {
+    const prioridad = /FECHA|EMISI/i.test(l) ? 0 : 1;
+    for (const mm of l.matchAll(/(?<!\d)(20\d{2})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?!\d)/g)) {
+      const f = plausible(+mm[1], +mm[2], +mm[3]); if (f) fechas.push({ f, prioridad, i });
     }
-  }
+    for (const mm of l.matchAll(/(?<![\d\-\/.])(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4}|\d{2})(?![\d\-\/])/g)) {
+      let y = +mm[3]; if (y < 100) y += 2000;
+      const f = plausible(y, +mm[2], +mm[1]); if (f) fechas.push({ f, prioridad, i });
+    }
+  });
+  fechas.sort((a, b) => a.prioridad - b.prioridad || a.i - b.i);
+  if (fechas.length) out.fecha = fechas[0].f;
 
   // RUT emisor
   const mr = texto.match(/\b(\d{1,2}\.?\d{3}\.?\d{3})\s*-\s*([\dkK])\b/);
@@ -116,7 +129,8 @@ export function interpretar(texto) {
   }
 
   // Folio
-  const mfo = texto.match(/(?:FOLIO|BOLETA[^\n\d]{0,30}N[°ºo.]?|N[°º]\s*)\s*:?\s*(\d{3,12})/i);
+  const mfo = texto.match(/BOLETA\s+ELECTR[OÓ]NICA\s*(?:N[°ºo.]*)?\s*:?\s*(\d{3,12})/i)
+    || texto.match(/(?:FOLIO|BOLETA[^\n\d]{0,30}N[°ºo.]?|N[°º]\s*)\s*:?\s*(\d{3,12})/i);
   if (mfo) out.folio = mfo[1];
 
   // Comercio: 1) marca conocida en cualquier parte del texto, 2) razón social junto al RUT, 3) primera línea legible
