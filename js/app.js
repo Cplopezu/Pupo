@@ -1385,14 +1385,28 @@ function categoriaPara(comercio, descripcion, tipo) {
 }
 
 // Prepara la vista previa: qué es nuevo, qué ya estaba importado y qué ya tenía boleta.
+// Medios que nunca aparecen en la cartola de la tarjeta de crédito
+const NO_TARJETA = new Set(['Efectivo', 'Transferencia', 'Tarjeta de débito']);
+const igual = (a, b) => Math.round(a) === Math.round(b);
+const primeraPalabra = t => (String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]{3,}/) || [''])[0];
+
 function prepararImportacion(r) {
   const usados = new Set();
+  const manuales = activos().filter(g => !deCartola(g) && !NO_TARJETA.has(g.medioPago));
   return r.gastos.map(m => {
     const id = idCartola(r, m);
     const fila = { m, id, incluir: true, estado: 'nuevo', ...categoriaPara(m.comercio, m.descripcion, m.tipo) };
-    if (S.gastos.some(g => g.id === id || (g.conciliado?.ref === m.ref && Math.round(g.monto) === Math.round(m.monto)))) { fila.estado = 'importado'; fila.incluir = false; return fila; }
-    const par = activos().find(g => !deCartola(g) && !usados.has(g.id) && Math.round(g.monto) === Math.round(m.monto) && Math.abs(diffDays(g.fecha, m.fecha)) <= 3);
-    if (par) { usados.add(par.id); fila.estado = 'boleta'; fila.par = par; fila.incluir = false; fila.cat = par.categoria; }
+    // ya importado antes, o cuota de una compra que usted registró completa y ya se concilió
+    const previo = S.gastos.find(g => g.id === id || (g.conciliado?.ref === m.ref && (igual(g.monto, m.monto) || igual(g.monto, m.montoTotal))));
+    if (previo) { fila.estado = previo.id === id ? 'importado' : 'cuota-registrada'; fila.par = previo; fila.incluir = false; return fila; }
+    const cerca = g => !usados.has(g.id) && Math.abs(diffDays(g.fecha, m.fecha)) <= 3;
+    // 1) mismo monto; en cuotas, el monto total de la compra
+    const par = manuales.find(g => cerca(g) && (igual(g.monto, m.monto) || (m.tipo === 'cuota' && igual(g.monto, m.montoTotal))));
+    if (par) { usados.add(par.id); fila.estado = 'boleta'; fila.par = par; fila.incluir = false; fila.cat = par.categoria; return fila; }
+    // 2) parecido: mismo comercio y monto cercano (propina, redondeo)
+    const pos = manuales.find(g => cerca(g) && Math.abs(diffDays(g.fecha, m.fecha)) <= 2 && primeraPalabra(g.comercio) === primeraPalabra(m.comercio)
+      && Math.abs(g.monto - m.monto) <= Math.max(1000, m.monto * 0.15));
+    if (pos) { usados.add(pos.id); fila.estado = 'posible'; fila.par = pos; fila.incluir = false; fila.cat = pos.categoria; }
     return fila;
   });
 }
@@ -1422,7 +1436,8 @@ function vistaImportacion(r, filas) {
   return {
     kicker: 'IMPORTAR · CARTOLA', titulo: `${r.banco}${r.tarjeta ? ' ••' + r.tarjeta : ''}`,
     html() {
-      const nBoleta = filas.filter(f => f.estado === 'boleta').length;
+      const nBoleta = filas.filter(f => f.estado === 'boleta' || f.estado === 'cuota-registrada').length;
+      const nPosible = filas.filter(f => f.estado === 'posible').length;
       const nImp = filas.filter(f => f.estado === 'importado').length;
       const nRev = filas.filter(f => f.estado === 'nuevo' && f.como === 'revisar').length;
       const cuotas = r.gastos.filter(g => g.tipo === 'cuota');
@@ -1431,6 +1446,7 @@ function vistaImportacion(r, filas) {
       let ins = `<p>Período facturado <b>${r.periodo ? `${fechaLarga(r.periodo.desde)} al ${fechaLarga(r.periodo.hasta)}` : '—'}</b>: ${r.gastos.length} cargos por <b>${$(r.total)}</b>, que cuadran con el total facturado de la cartola.</p>`;
       if (cuotas.length) ins += `<p>${cuotas.length} son <b>cuotas</b>: se registra el valor de la cuota que paga este mes, no la compra completa.</p>`;
       if (nBoleta) ins += `<p><b>${nBoleta}</b> ya los tenía registrados con boleta: no se duplican, solo quedan marcados como conciliados con el banco.</p>`;
+      if (nPosible) ins += `<p><b>${nPosible}</b> se parecen a gastos que ya registró, con un monto algo distinto (por ejemplo, propina). Quedan sin importar; revíselos abajo.</p>`;
       if (nImp) ins += `<p><b>${nImp}</b> ya se habían importado antes.</p>`;
       if (nRev) ins += `<p><b>${nRev}</b> comercios no se pudieron clasificar solos (marcados <span class="tag-pendiente">● revisar</span>): elija su categoría.</p>`;
       const omit = r.omitidos.length ? `<p class="muted small">No se importan: ${r.omitidos.map(o => `${esc(o.descripcion)} (${esc(o.motivo.toLowerCase())})`).join('; ')}.</p>` : '';
@@ -1441,12 +1457,14 @@ function vistaImportacion(r, filas) {
         + `<div class="panel panel-flush"><div class="table-wrap"><table class="imp-tabla">
           <thead><tr><th></th><th>Fecha</th><th>Comercio</th><th>Categoría</th><th class="num">Monto</th></tr></thead>
           <tbody>${filas.map((f, i) => `<tr class="${f.incluir ? '' : 'imp-off'}">
-            <td><input type="checkbox" class="imp-chk" data-i="${i}" ${f.incluir ? 'checked' : ''} ${f.estado === 'importado' ? 'disabled' : ''} aria-label="Incluir"></td>
+            <td><input type="checkbox" class="imp-chk" data-i="${i}" ${f.incluir ? 'checked' : ''} ${f.estado === 'importado' || f.estado === 'cuota-registrada' ? 'disabled' : ''} aria-label="Incluir"></td>
             <td class="mono">${fechaCorta(f.m.fechaGasto)}</td>
             <td><div>${esc(f.m.comercio)}${f.estado === 'nuevo' && f.como === 'revisar' ? '<span class="tag-pendiente">● revisar</span>' : ''}</div>
               <div class="id">${esc(f.m.descripcion)}${f.m.tipo === 'cuota' ? ` · cuota ${f.m.cuota.n}/${f.m.cuota.de} de ${$(f.m.montoTotal)}` : ''}</div>
-              ${f.estado === 'boleta' ? `<div class="small" style="color:var(--good)">✔ Ya registrado con boleta: ${folio(f.par)} · ${esc(f.par.comercio)}</div>` : ''}${etiqueta[f.estado]}</td>
-            <td>${f.estado === 'importado' ? '' : sel(f, i)}</td>
+              ${f.estado === 'boleta' ? `<div class="small" style="color:var(--good)">✔ Ya registrado: ${folio(f.par)} · ${esc(f.par.comercio)} ${$(f.par.monto)}${f.m.tipo === 'cuota' && !igual(f.par.monto, f.m.monto) ? ' (compra completa)' : ''}. No se duplica.</div>` : ''}
+              ${f.estado === 'posible' ? `<div class="small" style="color:var(--warn)">¿Es el mismo que ${folio(f.par)} · ${esc(f.par.comercio)} ${$(f.par.monto)}? Queda sin importar; márquelo si es otro gasto.</div>` : ''}
+              ${f.estado === 'cuota-registrada' ? `<div class="small" style="color:var(--good)">✔ Cuota de una compra que ya registró completa (${folio(f.par)}).</div>` : ''}${etiqueta[f.estado] || ''}</td>
+            <td>${f.estado === 'importado' || f.estado === 'cuota-registrada' ? '' : sel(f, i)}</td>
             <td class="num">${$(f.m.monto)}</td></tr>`).join('')}</tbody></table></div></div>`;
     },
     montar(body) {
@@ -1454,7 +1472,7 @@ function vistaImportacion(r, filas) {
       body.querySelectorAll('.imp-chk').forEach(c => c.addEventListener('change', () => { filas[c.dataset.i].incluir = c.checked; refrescar(); }));
       body.querySelectorAll('.imp-cat').forEach(c => c.addEventListener('change', () => { const f = filas[c.dataset.i]; f.cat = c.value; f.como = 'usuario'; refrescar(); }));
       body.querySelector('#imp-todos').addEventListener('click', () => { filas.forEach(f => { if (f.estado === 'nuevo') f.incluir = true; }); refrescar(); });
-      body.querySelector('#imp-ninguno').addEventListener('click', () => { filas.forEach(f => { f.incluir = false; }); refrescar(); });
+      body.querySelector('#imp-ninguno').addEventListener('click', () => { filas.forEach(f => { if (f.estado === 'nuevo') f.incluir = false; }); refrescar(); });
       body.querySelector('#imp-ok').addEventListener('click', async e => {
         e.currentTarget.disabled = true;
         const n = await confirmarImportacion(r, filas);
@@ -1523,8 +1541,8 @@ async function confirmarImportacion(r, filas) {
   const origenDe = m => ({ tipo: 'cartola', banco: r.banco, tarjeta: r.tarjeta, estado: r.fechaEstado, periodo: r.periodo, ref: m.ref, descripcion: m.descripcion, fechaOperacion: m.fecha, cuota: m.cuota, montoOperacion: m.montoTotal });
   for (const f of filas) {
     const m = f.m;
-    if (f.estado === 'boleta') {
-      // conciliación: la boleta registrada aparece en el banco
+    if ((f.estado === 'boleta' || f.estado === 'posible') && !f.incluir) {
+      // conciliación: el gasto registrado a mano aparece en el banco; no se crea otro
       const g = S.gastos.find(x => x.id === f.par.id);
       if (g && !g.conciliado) {
         g.conciliado = { banco: r.banco, estado: r.fechaEstado, ref: m.ref };
@@ -1535,7 +1553,7 @@ async function confirmarImportacion(r, filas) {
       }
       continue;
     }
-    if (!f.incluir || f.estado !== 'nuevo') continue;
+    if (!f.incluir || f.estado === 'importado' || f.estado === 'cuota-registrada') continue;
     const notas = [`${r.banco}${r.tarjeta ? ' ••' + r.tarjeta : ''} · estado de cuenta ${fechaCorta(r.fechaEstado)}`,
       m.tipo === 'cuota' ? `cuota ${m.cuota.n}/${m.cuota.de} de compra del ${fechaCorta(m.fecha)} por ${$(m.montoTotal)}` : ''].filter(Boolean).join(' · ');
     const g = {

@@ -16,7 +16,7 @@ Es una aplicación web instalable (PWA): funciona en el celular con la cámara, 
 **Importar cartola**
 - Cargue el PDF del estado de cuenta de la tarjeta (hoy: Banco Security) y la app registra todos los cargos del período, ya clasificados en Kakebo.
 - Las compras en cuotas se registran por el valor de la cuota del mes; los pagos a la tarjeta y las cuotas futuras se omiten. El total importado cuadra con el total facturado.
-- Si un gasto ya estaba registrado con boleta, no se duplica: queda **conciliado** con el banco. Reimportar la misma cartola no crea nada nuevo.
+- Si un gasto ya estaba registrado a mano, no se duplica: queda **conciliado** con el banco. Reconoce el mismo monto (±3 días), la compra en cuotas registrada completa (y sus cuotas de los meses siguientes) y pregunta por los parecidos con otro monto (propinas). Los gastos en efectivo, débito o transferencia no se cruzan con la tarjeta. Reimportar la misma cartola no crea nada nuevo.
 - La categoría que usted elija para un comercio se recuerda para las cartolas siguientes. El PDF se lee en el propio equipo.
 
 **Trazabilidad**
