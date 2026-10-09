@@ -1,5 +1,5 @@
 // Service worker: deja la app disponible sin conexión (los datos viven en IndexedDB).
-const CACHE = 'pupo-v3';
+const CACHE = 'pupo-v4';
 const SHELL = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/db.js', 'js/util.js', 'js/analisis.js', 'js/charts.js', 'js/ocr.js', 'js/nube.js', 'js/config.js', 'js/cartola.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', e => {

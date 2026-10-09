@@ -373,6 +373,20 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 tr.imp-off td { opacity: .5; }
 tr.imp-off td:first-child { opacity: 1; }
 
+/* ---------- Cobertura de cartolas ---------- */
+.grid-ajustes .panel-cartolas { grid-column: 1 / -1; }
+.cob-tarjeta { display: flex; flex-direction: column; gap: 8px; }
+.cob-tarjeta + .cob-tarjeta { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.cob-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.cob-meses { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; }
+.cob-mes { display: flex; flex-direction: column; gap: 1px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); font-size: 12px; font-family: var(--mono); }
+.cob-mes b { font-size: 13px; text-transform: capitalize; }
+.cob-mes.ok { border-color: rgba(43,212,125,.4); background: rgba(43,212,125,.07); color: var(--good); }
+.cob-mes.ok b { color: var(--text); }
+.cob-mes.falta { border-color: rgba(255,93,93,.4); background: rgba(255,93,93,.06); color: var(--crit); }
+.cob-mes.falta.antes { border-color: var(--line); background: none; color: var(--muted); }
+.cob-mes.curso { color: var(--muted); border-style: dashed; }
+
 /* ---------- Diálogo ---------- */
 .dlg-fondo { position: fixed; inset: 0; z-index: 70; background: rgba(3,6,10,.65); display: grid; place-items: center; padding: 16px; }
 .dlg { width: min(440px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 12px; }

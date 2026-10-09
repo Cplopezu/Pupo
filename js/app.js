@@ -2,7 +2,7 @@ import { db, getAjuste, setAjuste, pedirPersistencia, estimarUso } from './db.js
 import {
   $, $k, num, pct, pctPlano, esc, parseMonto, iso, toDate, addDays, diffDays, hoy, diasDelMes,
   DIAS, fechaCorta, fechaLarga, mesCorto, mesLargo, fechaHora, comprimirImagen, sha256,
-  blobToDataURL, dataURLToBlob, uid, descargar,
+  blobToDataURL, dataURLToBlob, uid, descargar, guardarArchivo,
 } from './util.js';
 import {
   rango, enRango, total, varPct, agrupar, serieDiaria, acumular, serieAgrupada, descomponer,
@@ -181,7 +181,7 @@ async function revisarAlmacen() {
   }
   aviso.hidden = !html;
   if (html) aviso.innerHTML = `<span class="ico">⚠</span><span class="txt">${html}</span>${reales >= 5 && !dentroDeOtraApp ? '<button class="btn-ghost" data-goto-respaldo>Respaldar</button>' : ''}`;
-  aviso.querySelector('[data-goto-respaldo]')?.addEventListener('click', () => irA('ajustes'));
+  aviso.querySelector('[data-goto-respaldo]')?.addEventListener('click', exportarJSON);
 }
 
 /* ============================================================
@@ -1466,12 +1466,61 @@ function vistaImportacion(r, filas) {
   };
 }
 
+// Qué estados de cuenta están cargados, por tarjeta y mes de cierre, en los últimos 12 meses.
+function coberturaCartolas() {
+  const tarjetas = new Map();
+  for (const g of S.gastos) {
+    const o = g.origen;
+    if (o?.tipo !== 'cartola' || !o.estado) continue;
+    const k = `${o.banco}${o.tarjeta ? ' ••' + o.tarjeta : ''}`;
+    if (!tarjetas.has(k)) tarjetas.set(k, new Map());
+    const mes = o.estado.slice(0, 7);
+    const m = tarjetas.get(k);
+    if (!m.has(mes)) m.set(mes, { estado: o.estado, n: 0, total: 0 });
+    const e = m.get(mes); e.n++; e.total += g.anulado ? 0 : g.monto;
+  }
+  const hoyD = new Date();
+  const meses = Array.from({ length: 12 }, (_, i) => iso(new Date(hoyD.getFullYear(), hoyD.getMonth() - i, 1)).slice(0, 7));
+  return { tarjetas, meses };
+}
+
+function htmlCobertura() {
+  const { tarjetas, meses } = coberturaCartolas();
+  if (!tarjetas.size) return `<div class="empty"><b>Aún no ha cargado cartolas</b>Importe el estado de cuenta en PDF desde Registrar → Importar cartola. Conviene partir por los últimos 3 a 12 meses.</div>`;
+  const mesActual = meses[0];
+  return [...tarjetas.entries()].map(([k, m]) => {
+    const primero = [...m.keys()].sort()[0];
+    const faltan = meses.filter(x => x !== mesActual && x > primero && !m.has(x));
+    const previos = meses.filter(x => x < primero).length;
+    return `<div class="cob-tarjeta">
+      <div class="cob-head"><b>${esc(k)}</b><span class="muted small">${m.size} ${m.size === 1 ? 'cartola cargada' : 'cartolas cargadas'} · ${faltan.length ? `faltan ${faltan.length} desde ${mesCorto(primero + '-01')}` : `completo desde ${mesCorto(primero + '-01')} ✔`}${previos ? ` · puede sumar ${previos} meses anteriores para ver la tendencia del año` : ''}</span></div>
+      <div class="cob-meses">${[...meses].reverse().map(x => {
+        const e = m.get(x), nombre = mesCorto(x + '-01');
+        if (e) return `<div class="cob-mes ok" title="Estado de cuenta al ${fechaLarga(e.estado)}"><b>${nombre}</b><span>✔ ${e.n} mov.</span><span>${$k(e.total)}</span></div>`;
+        if (x === mesActual) return `<div class="cob-mes curso"><b>${nombre}</b><span>en curso</span></div>`;
+        return `<div class="cob-mes falta ${x < primero ? 'antes' : ''}"><b>${nombre}</b><span>${x < primero ? 'anterior' : '✖ falta'}</span></div>`;
+      }).join('')}</div>
+      ${faltan.length ? `<p class="small" style="margin:6px 0 0">Para completar: descargue del banco los estados de cuenta que cierran en <b>${faltan.map(x => mesLargo(+x.slice(0, 4), +x.slice(5) - 1)).join(', ')}</b>.</p>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function drillCobertura() {
+  return {
+    kicker: 'CARTOLAS · COBERTURA', titulo: '¿Qué cartolas me faltan?',
+    html: () => `<div class="insight"><p>Cada tarjeta tiene <b>un estado de cuenta al mes</b>. Aquí ve cuáles ya cargó (✔) y cuáles faltan (✖) en los últimos 12 meses. Los meses anteriores a su primera cartola son opcionales: cárguelos si quiere ver la tendencia del año.</p><p>Si tiene <b>otra tarjeta o cuenta corriente</b>, cárguela también: aparecerá como una fila nueva. Si alguna cartola no se lee bien, envíela para agregar su formato.</p></div>`
+      + htmlCobertura()
+      + `<div class="row"><button class="btn-primary" data-importar-drawer>Importar cartola (PDF)</button></div>`,
+    montar(body) { body.querySelector('[data-importar-drawer]')?.addEventListener('click', () => el('cartola-pdf').click()); },
+  };
+}
+
 async function confirmarImportacion(r, filas) {
   const ahora = Date.now();
   let seq = S.gastos.reduce((m, x) => Math.max(m, x.seq || 0), 0);
   let creados = 0, conciliados = 0;
   const por = nubeEmail() || undefined;
-  const origenDe = m => ({ tipo: 'cartola', banco: r.banco, tarjeta: r.tarjeta, estado: r.fechaEstado, ref: m.ref, descripcion: m.descripcion, fechaOperacion: m.fecha, cuota: m.cuota, montoOperacion: m.montoTotal });
+  const origenDe = m => ({ tipo: 'cartola', banco: r.banco, tarjeta: r.tarjeta, estado: r.fechaEstado, periodo: r.periodo, ref: m.ref, descripcion: m.descripcion, fechaOperacion: m.fecha, cuota: m.cuota, montoOperacion: m.montoTotal });
   for (const f of filas) {
     const m = f.m;
     if (f.estado === 'boleta') {
@@ -1509,6 +1558,7 @@ async function confirmarImportacion(r, filas) {
    Libro de gastos
    ============================================================ */
 function bindImportar() {
+  document.querySelectorAll('[data-cobertura]').forEach(b => b.addEventListener('click', () => abrir(drillCobertura())));
   document.querySelectorAll('[data-importar]').forEach(b => b.addEventListener('click', () => el('cartola-pdf').click()));
   el('cartola-pdf').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importarCartola(f); });
 }
@@ -1557,6 +1607,7 @@ function bindAjustes() {
 
 async function renderAjustes() {
   renderNube();
+  el('cobertura-cartolas').innerHTML = htmlCobertura();
   const tot = Object.values(S.presupuestos).reduce((s, v) => s + (+v || 0), 0);
   el('presupuestos').innerHTML = S.categorias.map(c => `
     <label class="field"><span><i class="swatch" style="background:${colorCat(c)}"></i>${esc(c)}</span>
@@ -1574,9 +1625,18 @@ async function exportarJSON() {
   const imagenes = [];
   for (const i of imgs) imagenes.push({ id: i.id, hash: i.hash, w: i.w, h: i.h, creado: i.creado, data: await blobToDataURL(blobDe(i)) });
   const payload = { app: 'pupo-gastos', version: 1, exportado: new Date().toISOString(), ajustes: { categorias: S.categorias, presupuestos: S.presupuestos }, gastos: S.gastos, imagenes };
-  descargar(`pupo-respaldo-${hoy()}.json`, JSON.stringify(payload), 'application/json');
+  const nombre = `pupo-respaldo-${hoy()}.json`, texto = JSON.stringify(payload);
+  let res = await guardarArchivo(nombre, texto, 'application/json');
+  if (res === 'requiere-toque') {
+    // el navegador pide un toque directo para abrir el menú Compartir
+    if (await dialogo({ titulo: 'Respaldo listo', texto: `${S.gastos.length} gastos y ${imagenes.length} fotos. Toque Guardar y elija "Guardar en Archivos" (iCloud Drive) o envíelo a su correo.`, ok: 'Guardar respaldo' }) == null) return;
+    res = await guardarArchivo(nombre, texto, 'application/json');
+  }
+  if (res === 'cancelado') return toast('Respaldo cancelado');
   await setAjuste('ultimoRespaldo', Date.now());
+  toast('✔ Respaldo guardado');
   revisarAlmacen();
+  if (el('view-ajustes').classList.contains('is-active')) renderAjustes();
 }
 
 function exportarCSV() {
@@ -1587,7 +1647,7 @@ function exportarCSV() {
     g.imagenId ? 'Sí' : 'No', g.imagenHash || '', g.anulado ? 'Anulado' : 'Vigente',
     g.creado ? new Date(g.creado).toISOString() : '', g.modificado ? new Date(g.modificado).toISOString() : '',
   ].map(q).join(';'));
-  descargar(`pupo-libro-${hoy()}.csv`, '﻿' + [cols.map(q).join(';'), ...rows].join('\r\n'), 'text/csv;charset=utf-8');
+  guardarArchivo(`pupo-libro-${hoy()}.csv`, '﻿' + [cols.map(q).join(';'), ...rows].join('\r\n'), 'text/csv;charset=utf-8');
 }
 
 async function importarJSON(e) {

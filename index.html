@@ -101,7 +101,7 @@
     <section class="view" id="view-registrar">
       <div class="importar-banda">
         <div><b>¿Tiene la cartola del banco?</b> <span class="muted">Cargue el PDF del estado de cuenta y la app registra todos los gastos del mes.</span></div>
-        <button type="button" class="btn-ghost" data-importar>Importar cartola (PDF)</button>
+        <div class="row"><button type="button" class="btn-ghost" data-cobertura>¿Qué cartolas me faltan?</button><button type="button" class="btn-primary" data-importar>Importar cartola (PDF)</button></div>
       </div>
       <form id="form-gasto" class="form-grid" autocomplete="off" novalidate>
         <div class="panel photo-panel">
@@ -208,6 +208,10 @@
           <header class="panel-head"><h2>Cuenta y nube</h2><span class="hint" id="nube-estado-txt"></span></header>
           <div id="nube-cuerpo"></div>
         </div>
+        <div class="panel panel-cartolas">
+          <header class="panel-head"><h2>Cartolas cargadas</h2><button class="btn-ghost" data-importar>Importar cartola</button></header>
+          <div id="cobertura-cartolas"></div>
+        </div>
         <div class="panel panel-ppto">
           <header class="panel-head"><h2>Presupuesto mensual por categoría</h2></header>
           <p class="muted small">Base para el control de consumo y la proyección de cierre.</p>
@@ -216,9 +220,9 @@
         </div>
         <div class="panel">
           <header class="panel-head"><h2>Respaldo y exportación</h2></header>
-          <p class="muted small">Copia completa de sus gastos y fotos en un archivo, para guardar o pasar a otro equipo.</p>
+          <p class="muted small">Copia completa de sus gastos y fotos en un archivo. En el iPhone se abre el menú Compartir: elija <b>Guardar en Archivos → iCloud Drive</b> o envíelo a su correo. Para recuperarlo, use <b>Restaurar respaldo</b> y elija ese archivo.</p>
           <div class="stack">
-            <button class="btn-ghost" id="btn-export-json">Descargar respaldo completo (.json con fotos)</button>
+            <button class="btn-ghost" id="btn-export-json">Guardar respaldo completo (con fotos)</button>
             <button class="btn-ghost" id="btn-export-csv">Exportar libro a Excel (.csv)</button>
             <label class="btn-ghost file-btn">Restaurar respaldo…<input type="file" id="import-json" accept="application/json" hidden></label>
           </div>

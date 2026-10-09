@@ -99,3 +99,25 @@ export function descargar(nombre, contenido, tipo) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
+
+// En celulares abre el menú Compartir (Guardar en Archivos, iCloud, correo, WhatsApp);
+// en computador descarga el archivo. Devuelve 'compartido' | 'descargado' | 'cancelado' | 'requiere-toque'.
+export async function guardarArchivo(nombre, contenido, tipo) {
+  const tactil = navigator.maxTouchPoints > 0 && /Mobi|iPhone|iPad|Android/i.test(navigator.userAgent + (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 ? ' iPad' : ''));
+  if (tactil && navigator.canShare) {
+    for (const t of [tipo, 'text/plain']) {
+      const file = new File([contenido], nombre, { type: t });
+      if (!navigator.canShare({ files: [file] })) continue;
+      try {
+        await navigator.share({ files: [file], title: nombre });
+        return 'compartido';
+      } catch (e) {
+        if (e.name === 'AbortError') return 'cancelado';
+        if (e.name === 'NotAllowedError') return 'requiere-toque';
+        break;
+      }
+    }
+  }
+  descargar(nombre, contenido, tipo);
+  return 'descargado';
+}
