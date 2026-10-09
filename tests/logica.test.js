@@ -65,3 +65,50 @@ test('interpretar reconoce marcas y razón social junto al RUT', () => {
   const r = interpretar('*** BIENVENIDO ***\n12/09/2026\nCOMERCIAL LA ESPIGA SPA\nRUT: 77.123.456-1\nTOTAL 4.500');
   assert.equal(r.comercio, 'Comercial La Espiga SPA');
 });
+
+import { interpretarCartola, limpiarComercio } from '../js/cartola.js';
+
+// Filas sintéticas con la misma estructura que entrega pdf.js para un estado de cuenta de tarjeta.
+const it = (x, s) => ({ x, s });
+const mov = (lugar, fecha, ref, desc, op, tot, n, de, cuota) => [it(47, lugar), it(190, fecha), it(239, ref), it(290, desc), it(404, op), it(450, tot), it(487, `${n} ${de}`), it(495, '/'), it(524, cuota)];
+const filas = [
+  [it(51, 'Estado de Cuenta Nacional al 17/09/2026')],
+  [it(51, 'Nº tarjeta de crédito'), it(300, '**** **** **** 1234')],
+  [it(266, 'Período facturado'), it(427, '20/08/2026'), it(491, '17/09/2026')],
+  [it(47, '1.TOTAL OPERACIONES'), it(512, '$-80.000')],
+  [it(190, '07/09/2026'), it(239, '0000000000'), it(290, 'MONTO CANCELADO'), it(392, '$-100.000'), it(438, '$-100.000'), it(487, '01 01'), it(495, '/'), it(512, '$-100.000')],
+  mov('SANTIAGO', '21/08/2026', '0011111111', 'MERCADOPAGO', '$8.360', '$8.360', '01', '01', '$8.360'),
+  [it(290, '*CAFETERIA Las Condes')],
+  mov('SANTIAGO', '22/08/2026', '0022222222', 'PAYU *UBER TRIP', '$2.999', '$2.999', '01', '01', '$2.999'),
+  mov('SANTIAGO', '08/04/2026', '0033333333', 'MP *MERCADO LIBRE TASA', '$21.660', '$21.660', '06', '06', '$3.610'),
+  [it(290, 'INT. 0,00%')],
+  mov('SANTIAGO', '10/09/2026', '0044444444', 'COPEC APP SANTIAGO', '$5.031', '$5.031', '01', '01', '$5.031'),
+  [it(47, '3.CARGOS, COMISIONES, IMPUESTOS Y ABONOS'), it(524, '$2.330')],
+  [it(190, '17/09/2026'), it(239, '0000000000'), it(290, 'COMISION'), it(408, '$2.330'), it(454, '$2.330'), it(487, '01 01'), it(495, '/'), it(528, '$2.330')],
+  [it(47, '4.INFORMACION COMPRAS EN CUOTAS EN PERIO'), it(524, '$0')],
+  mov('Las Condes', '22/08/2026', '0055555555', 'MERCADOPAGO', '$34.191', '$34.191', '00', '03', '$11.397'),
+  [it(51, 'Información de pago')],
+];
+
+test('cartola: separa compras, cuotas y cargos, y omite pagos y cuotas futuras', () => {
+  const r = interpretarCartola({ filas, titulo: 'Banco Security' });
+  assert.equal(r.banco, 'Banco Security');
+  assert.equal(r.tarjeta, '1234');
+  assert.deepEqual(r.periodo, { desde: '2026-08-20', hasta: '2026-09-17' });
+  assert.equal(r.gastos.length, 5);
+  assert.equal(r.total, 8360 + 2999 + 3610 + 5031 + 2330);
+  const cuota = r.gastos.find(g => g.tipo === 'cuota');
+  assert.deepEqual(cuota.cuota, { n: 6, de: 6 });
+  assert.equal(cuota.monto, 3610);
+  assert.equal(cuota.fechaGasto, '2026-09-17'); // compra anterior al período: se registra al cierre
+  assert.equal(r.gastos[0].comercio, 'Cafeteria');
+  assert.equal(r.gastos.find(g => g.tipo === 'cargo').comercio, 'Banco · Comision');
+  assert.deepEqual(r.omitidos.map(o => o.motivo), ['Pago o abono a la tarjeta', 'Cuota futura (aún no se cobra)']);
+});
+
+test('cartola: limpia nombres de comercio bancarios', () => {
+  assert.equal(limpiarComercio('PAYU *UBER TRIP SANTIAGO'), 'Uber');
+  assert.equal(limpiarComercio('COPEC APP SANTIAGO'), 'Copec');
+  assert.equal(limpiarComercio('TUU*KADITEC NUNOA'), 'Kaditec');
+  assert.equal(limpiarComercio('CAFE DEL PARQUE SPA SANTIAGO'), 'Cafe Del Parque SPA');
+});

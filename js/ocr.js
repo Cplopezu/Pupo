@@ -44,6 +44,23 @@ const MARCAS = [
   [/OXXO/i, 'OXXO'], [/PRONTO\s*COPEC/i, 'Pronto Copec'], [/ANT[AÁ]RTICA/i, 'Librería Antártica'], [/PREUNIC/i, 'Preunic'],
 ];
 
+// Nombres frecuentes en cartolas bancarias (no se usan al leer boletas: "SII" o "parking" aparecen en cualquier boleta)
+const MARCAS_CARTOLA = [
+  [/UBER\s*(TRIP|\*TRIP)?/i, 'Uber'], [/MERCADO\s*LIBRE|MERCADOLIBRE/i, 'Mercado Libre'], [/RED\s*MOVILIDAD/i, 'Red Movilidad (transporte público)'],
+  [/CLARO\s*(RECAUDACION)?|CLAROTEL/i, 'Claro'], [/CIN[EÉ]POLIS/i, 'Cinépolis'], [/C\.\s*VERDE/i, 'Cruz Verde'], [/\bBK\b|BURGER\s*KING/i, 'Burger King'],
+  [/COMUNIDAD\s*FELIZ|COMUNIDADFELIZ/i, 'ComunidadFeliz (gastos comunes)'], [/KRISPY|KRISPYKR/i, 'Krispy Kreme'], [/H&M/i, 'H&M'],
+  [/CL[IÍ]NICA\s*ALEMANA/i, 'Clínica Alemana'], [/EQUIFAX/i, 'Equifax'], [/\bTGR\b/i, 'Tesorería (TGR)'], [/^SII\b|\bSII\s/i, 'SII'],
+  [/LET\.?\s*HIPOTEC/i, 'Dividendo hipotecario'], [/MASVIDA/i, 'Isapre Nueva Masvida'], [/CINNABON/i, 'Cinnabon'],
+  [/AKIPARK|PARKING|ESTACIONAMIENT/i, 'Estacionamiento'], [/AUTOPIST/i, 'Autopista'], [/WEBPAY\s*MUNICIPAL/i, 'Municipalidad (pago web)'],
+];
+
+// Devuelve el nombre normalizado si el texto corresponde a una marca conocida.
+export function marcaConocida(texto) {
+  const t = String(texto || '');
+  const m = MARCAS.find(([re]) => re.test(t)) || MARCAS_CARTOLA.find(([re]) => re.test(t));
+  return m ? m[1] : null;
+}
+
 const IGNORAR = /BOLETA|ELECTR|R\.?\s?U\.?\s?T|SII|GIRO|FACTURA|FECHA|HORA|DIRECCI|CASA MATRIZ|SUCURSAL|TEL[EÉ]F|FONO|CAJA|CAJERO|TOTAL|NETO|IVA|VUELTO|EFECTIVO|TARJETA|TIMBRE|VERIFIQUE|WWW|\.CL|@/i;
 function esNombre(l) {
   const letras = (l.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]/g) || []).length;

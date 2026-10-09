@@ -13,6 +13,12 @@ Es una aplicación web instalable (PWA): funciona en el celular con la cámara, 
 - Sugiere la categoría según el comercio o el texto de la boleta, y recuerda el comercio por su RUT: si corrige un nombre una vez, la próxima boleta de ese RUT ya sale bien.
 - **Control de duplicados**: avisa si la misma foto o el mismo monto/fecha/comercio ya fue registrado.
 
+**Importar cartola**
+- Cargue el PDF del estado de cuenta de la tarjeta (hoy: Banco Security) y la app registra todos los cargos del período, ya clasificados en Kakebo.
+- Las compras en cuotas se registran por el valor de la cuota del mes; los pagos a la tarjeta y las cuotas futuras se omiten. El total importado cuadra con el total facturado.
+- Si un gasto ya estaba registrado con boleta, no se duplica: queda **conciliado** con el banco. Reimportar la misma cartola no crea nada nuevo.
+- La categoría que usted elija para un comercio se recuerda para las cartolas siguientes. El PDF se lee en el propio equipo.
+
 **Trazabilidad**
 - Folio interno correlativo (`G-00001`…).
 - Huella **SHA-256** de cada foto, con botón para *verificar integridad* (detecta si la imagen fue alterada).
@@ -78,6 +84,7 @@ css/app.css           Tema oscuro tipo terminal financiero
 js/app.js             Lógica de pantallas, análisis drill-down, registro, libro, respaldos
 js/analisis.js        Períodos, agregaciones y descomposición de variaciones
 js/charts.js          Gráficos SVG (líneas con crosshair, barras, sparklines)
+js/cartola.js         Lectura de estados de cuenta PDF (pdf.js) e interpretación de movimientos
 js/ocr.js             OCR de boletas e interpretación de montos/fecha/RUT/folio chilenos
 js/db.js              Persistencia en IndexedDB
 js/nube.js            Cuenta, libros compartidos y sincronización con Supabase

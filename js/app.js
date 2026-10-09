@@ -10,6 +10,7 @@ import {
 } from './analisis.js';
 import { lineChart, barChart, sparkline } from './charts.js';
 import { leerBoleta } from './ocr.js';
+import { leerCartola } from './cartola.js';
 import {
   iniciarNube, nubeEstado, nubeEmail, alCambiar, sincronizar, entrar, registrarse, salir, unirseALibro,
   renombrarLibro, guardarConfigNube, configNube, bajarFoto, contarPendientesNube,
@@ -30,10 +31,11 @@ const KAKEBO_DESC = {
 const MIGRAR_CAT = { Supermercado: 'Supervivencia', Transporte: 'Supervivencia', Hogar: 'Supervivencia', Salud: 'Supervivencia', Servicios: 'Supervivencia', Restaurantes: 'Ocio y vicio', Ocio: 'Ocio y vicio', Otros: 'Extras' };
 // Palabras clave para sugerir la categoría según el comercio o el texto de la boleta
 const PISTAS_CAT = [
-  ['Cultura', /librer|libro|antartica|antártica|buscalibre|teatro|museo|curso|coursera|udemy|platzi|universidad|diplomado|revista|kindle|audible|concierto|opera|ópera|biblioteca/i],
-  ['Ocio y vicio', /restaur|caf[eé]|starbucks|juan valdez|\bbar\b|pub|botiller|cerveza|pizza|sushi|burger|mcdonald|doggis|juan maestro|kfc|cinemark|hoyts|\bcine|netflix|spotify|disney|hbo|prime video|ticket|rappi|pedidos ?ya|uber ?eats|casino|cigarr|tabaco|helad|pasteler/i],
+  ['Extras', /^banco ·|equifax|h&m|mercado ?libre|merpago\*melimas|regalo/i],
+  ['Cultura', /corpcult|corporaci[oó]n cultural|l[aá]piz l[oó]pez|librer|libro|antartica|antártica|buscalibre|teatro|museo|curso|coursera|udemy|platzi|universidad|diplomado|revista|kindle|audible|concierto|opera|ópera|biblioteca/i],
+  ['Ocio y vicio', /cafeter|coffee|cinnabon|krispy|snack|brekkie|cin[eé]polis|burger king|sushi|empanad|helader|restaur|caf[eé]|starbucks|juan valdez|\bbar\b|pub|botiller|cerveza|pizza|sushi|burger|mcdonald|doggis|juan maestro|kfc|cinemark|hoyts|\bcine|netflix|spotify|disney|hbo|prime video|ticket|rappi|pedidos ?ya|uber ?eats|casino|cigarr|tabaco|helad|pasteler/i],
   ['Extras', /regalo|ferreter|sodimac|\beasy\b|homecenter|ikea|reparaci|taller|mec[aá]nic|veterinar|multa|notar|correos|falabella|paris|ripley|hites|la polar|ropa|zapat/i],
-  ['Supervivencia', /supermerc|jumbo|l[ií]der|unimarc|tottus|santa isabel|acuenta|ekono|mayorista|farmacia|cruz verde|salcobrand|ahumada|copec|shell|petrobras|aramco|enex|metro|\bbip\b|uber|cabify|didi|autopista|\btag\b|enel|aguas|metrogas|gasco|abastible|lipigas|movistar|entel|\bwom\b|\bvtr\b|claro|cl[ií]nica|isapre|fonasa|m[eé]dic|dental|panader|carnicer|verduler|almac[eé]n|arriendo|gastos comunes|colegio|jard[ií]n/i],
+  ['Supervivencia', /red movilidad|transporte p[uú]blico|estacionamiento|autopista|dividendo|hipotec|comunidadfeliz|gastos comunes|isapre|masvida|internet|seguro|municipal|\bsii\b|tesorer[ií]a|\btgr\b|school|colegio|odontolog|dental|cl[ií]nica|farmacia|feria|manantial|minimarket|mimarket|supermerc|jumbo|l[ií]der|unimarc|tottus|santa isabel|acuenta|ekono|mayorista|farmacia|cruz verde|salcobrand|ahumada|copec|shell|petrobras|aramco|enex|metro|\bbip\b|uber|cabify|didi|autopista|\btag\b|enel|aguas|metrogas|gasco|abastible|lipigas|movistar|entel|\bwom\b|\bvtr\b|claro|cl[ií]nica|isapre|fonasa|m[eé]dic|dental|panader|carnicer|verduler|almac[eé]n|arriendo|gastos comunes|colegio|jard[ií]n/i],
 ];
 function sugerirCategoria(texto) {
   const t = String(texto || '');
@@ -59,6 +61,8 @@ const el = id => document.getElementById(id);
 const colorCat = c => { const i = S.categorias.indexOf(c); return i >= 0 && i < PALETA.length ? PALETA[i] : GRIS; };
 const activos = () => S.gastos.filter(g => !g.anulado);
 const folio = g => 'G-' + String(g.seq || 0).padStart(5, '0');
+const deCartola = g => g.origen?.tipo === 'cartola' || !!g.conciliado;
+const tieneRespaldo = g => !!g.imagenId || deCartola(g);
 
 function deltaChip(v, { invertir = false } = {}) {
   if (v == null || !isFinite(v)) return '<span class="delta flat">nuevo</span>';
@@ -134,6 +138,7 @@ async function init() {
   bindNav();
   bindForm();
   bindLibro();
+  bindImportar();
   bindAjustes();
   bindDrawer();
   bindDelegados();
@@ -431,9 +436,9 @@ function renderDashboard() {
   const diario = serieDiaria(A, r.desde, r.hasta);
   const prom = tA / r.dias, promB = tB / r.prevDias;
   const tk = A.length ? tA / A.length : 0, tkB = B.length ? tB / B.length : 0;
-  const conFoto = A.filter(g => g.imagenId).length;
+  const conFoto = A.filter(tieneRespaldo).length;
   const resp = A.length ? conFoto / A.length * 100 : 0;
-  const respB = B.length ? B.filter(g => g.imagenId).length / B.length * 100 : 0;
+  const respB = B.length ? B.filter(tieneRespaldo).length / B.length * 100 : 0;
   const cats = agrupar(A, g => g.categoria);
   const top = cats[0];
 
@@ -457,7 +462,7 @@ function renderDashboard() {
     id: 'presupuesto', label: 'Presupuesto consumido', value: consumo == null ? '—' : pctPlano(consumo),
     sub: consumo == null ? '<span>Sin presupuesto definido</span>' : `${estadoChip(consumo, r.enCurso ? r.dias / diasDelMes(toDate(r.desde).getFullYear(), toDate(r.desde).getMonth()) * 100 : 100)}<span>de ${$k(ppto)}</span>`,
   });
-  kpis.push({ id: 'respaldo', label: 'Respaldo con foto', value: pctPlano(resp), sub: `${deltaChip(resp - respB, { invertir: true }).replace('%', ' pp')}<span>${A.length - conFoto} sin foto</span>` });
+  kpis.push({ id: 'respaldo', label: 'Respaldo documental', value: pctPlano(resp), sub: `${deltaChip(resp - respB, { invertir: true }).replace('%', ' pp')}<span>${A.length - conFoto} sin respaldo</span>` });
   kpis.push({ id: 'categoria', label: 'Categoría principal', value: esc(top?.clave || '—'), sub: top ? `<span><i class="swatch" style="background:${colorCat(top.clave)}"></i>${pctPlano(top.total / tA * 100)} del gasto · ${$k(top.total)}</span>` : '<span>—</span>' });
 
   el('kpis').innerHTML = kpis.map(k => `
@@ -536,7 +541,7 @@ function tablaGastos(list, { vacio = 'Sin movimientos', limite, foot = false } =
   if (!list.length) return `<div class="empty">${vacio}</div>`;
   const rows = (limite ? list.slice(0, limite) : list).map(g => `
     <tr data-gasto="${g.id}" class="${g.anulado ? 'anulado' : ''}">
-      <td>${g.imagenId ? `<img class="thumb" data-img="${g.imagenId}" alt="">` : '<span class="thumb-empty">s/f</span>'}</td>
+      <td>${g.imagenId ? `<img class="thumb" data-img="${g.imagenId}" alt="">` : deCartola(g) ? '<span class="thumb-empty" title="Respaldo: cartola bancaria">▤</span>' : '<span class="thumb-empty">s/f</span>'}</td>
       <td class="mono">${fechaCorta(g.fecha)}</td>
       <td><div>${esc(g.comercio)}${g.comercioPendiente ? '<span class="tag-pendiente">● completar</span>' : ''}</div><div class="id">${folio(g)}${g.folio ? ' · N° ' + esc(g.folio) : ''}</div></td>
       <td class="hide-sm"><span class="tag"><i class="swatch" style="background:${colorCat(g.categoria)}"></i>${esc(g.categoria)}</span></td>
@@ -597,6 +602,7 @@ function abrir(vista, { reemplazar = false } = {}) {
 }
 function cerrar() {
   pila.length = 0;
+  setTimeout(() => { if (!pila.length) el('drawer-body').innerHTML = ''; }, 300);
   el('drawer').classList.remove('is-open');
   el('drawer').setAttribute('aria-hidden', 'true');
   el('drawer-backdrop').hidden = true;
@@ -909,21 +915,22 @@ function drillRespaldo() {
     kicker: 'TRAZABILIDAD · RESPALDO', titulo: 'Respaldo documental',
     html() {
       const { A, tA } = contexto();
-      const sin = A.filter(g => !g.imagenId).sort((a, b) => b.monto - a.monto);
+      const sin = A.filter(g => !tieneRespaldo(g)).sort((a, b) => b.monto - a.monto);
       const conF = A.length - sin.length;
+      const nFoto = A.filter(g => g.imagenId).length, nCart = A.filter(deCartola).length;
       const pc = A.length ? conF / A.length * 100 : 0;
       const mSin = total(sin);
-      let ins = `<p><b>${conF} de ${A.length}</b> gastos tienen foto de respaldo (${pctPlano(pc)}).</p>`;
+      let ins = `<p><b>${conF} de ${A.length}</b> gastos tienen respaldo (${pctPlano(pc)}): ${nFoto} con foto de boleta y ${nCart} respaldados por la cartola del banco.</p>`;
       if (sin.length) ins += `<p>Hay <b>${$(mSin)}</b> sin respaldo documental (${pctPlano(tA ? mSin / tA * 100 : 0)} del monto). Pinche un gasto para editarlo y adjuntar la boleta.</p>`;
       const pend = A.filter(g => g.comercioPendiente).length;
       if (pend) ins += `<p><b>${pend}</b> ${pend === 1 ? 'gasto tiene' : 'gastos tienen'} el comercio por identificar (marcados “● completar” en el libro).</p>`;
       const porCat = agrupar(A, g => g.categoria);
-      return hero(pctPlano(pc), '', 'de los gastos con foto de boleta')
+      return hero(pctPlano(pc), '', 'de los gastos con boleta o cartola')
         + `<div class="insight">${ins}</div>`
-        + minis([['Con foto', num(conF)], ['Sin foto', num(sin.length)], ['Monto sin respaldo', $(mSin)], ['Duplicados detectados', num(duplicados(A).length)]])
+        + minis([['Con foto', num(nFoto)], ['Con cartola', num(nCart)], ['Sin respaldo', num(sin.length)], ['Monto sin respaldo', $(mSin)], ['Duplicados detectados', num(duplicados(A).length)]])
         + sec('Cobertura por categoría') + `<div class="panel panel-flush"><div class="table-wrap"><table>
-          <thead><tr><th>Categoría</th><th class="num">Gastos</th><th class="num">Con foto</th><th>Cobertura</th></tr></thead>
-          <tbody>${porCat.map(c => { const k = c.items.filter(g => g.imagenId).length, p = k / c.n * 100; return `<tr data-cat="${esc(c.clave)}"><td><i class="swatch" style="background:${colorCat(c.clave)}"></i>${esc(c.clave)}</td><td class="num">${c.n}</td><td class="num">${k}</td><td><div class="meter"><span style="width:${p}%;background:${p >= 80 ? 'var(--good)' : p >= 50 ? 'var(--warn)' : 'var(--crit)'}"></span></div><span class="mono small">${pctPlano(p)}</span></td></tr>`; }).join('')}</tbody></table></div></div>`
+          <thead><tr><th>Categoría</th><th class="num">Gastos</th><th class="num">Con respaldo</th><th>Cobertura</th></tr></thead>
+          <tbody>${porCat.map(c => { const k = c.items.filter(tieneRespaldo).length, p = k / c.n * 100; return `<tr data-cat="${esc(c.clave)}"><td><i class="swatch" style="background:${colorCat(c.clave)}"></i>${esc(c.clave)}</td><td class="num">${c.n}</td><td class="num">${k}</td><td><div class="meter"><span style="width:${p}%;background:${p >= 80 ? 'var(--good)' : p >= 50 ? 'var(--warn)' : 'var(--crit)'}"></span></div><span class="mono small">${pctPlano(p)}</span></td></tr>`; }).join('')}</tbody></table></div></div>`
         + sec('Gastos sin respaldo (mayor a menor)') + `<div class="panel panel-flush">${tablaGastos(sin, { limite: 25, vacio: 'Todos los gastos tienen respaldo ✔' })}</div>`;
     },
   };
@@ -1051,6 +1058,8 @@ function drillGasto(id) {
             <dt>Documento</dt><dd>${esc(g.documento || '—')}${g.folio ? ' N° ' + esc(g.folio) : ''}</dd>
             <dt>RUT emisor</dt><dd class="mono">${esc(g.rut || '—')}</dd>
             <dt>Notas</dt><dd>${esc(g.notas || '—')}</dd>
+            ${g.origen?.tipo === 'cartola' ? `<dt>Origen</dt><dd>Cartola ${esc(g.origen.banco)} ••${esc(g.origen.tarjeta || '')} · estado ${fechaLarga(g.origen.estado)}<br><span class="mono small">${esc(g.origen.descripcion)} · ref ${esc(g.origen.ref)}</span></dd>` : ''}
+            ${g.conciliado ? `<dt>Conciliado</dt><dd>✔ Aparece en la cartola ${esc(g.conciliado.banco)} del ${fechaLarga(g.conciliado.estado)} (ref ${esc(g.conciliado.ref)})</dd>` : ''}
             <dt>Registrado</dt><dd>${g.creado ? fechaHora(g.creado) : '—'}${g.registradoPor ? ` · ${esc(g.registradoPor)}` : ''}</dd>
             <dt>Última modificación</dt><dd>${g.modificado ? fechaHora(g.modificado) : '—'}</dd>
             ${g.imagenHash ? `<dt>Huella SHA-256</dt><dd><span class="hash">${g.imagenHash}</span><br><button class="btn-ghost" id="d-verificar" style="margin-top:6px;padding:6px 10px;font-size:12px">Verificar integridad de la foto</button> <span id="d-verif" class="small"></span></dd>` : ''}
@@ -1356,8 +1365,154 @@ async function guardarGasto() {
 }
 
 /* ============================================================
+   Importar cartola bancaria (PDF)
+   ============================================================ */
+// Identificador estable de cada movimiento: reimportar la misma cartola no duplica nada.
+// Incluye monto y descripción porque el banco repite códigos de referencia (p. ej. comisiones del mismo día).
+const idCartola = (r, m) => {
+  const clave = `${m.descripcion}|${m.valorCuota}`;
+  let h = 0;
+  for (const ch of clave) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return `cart-${r.tarjeta || 'x'}-${m.ref}-${m.cuota ? m.cuota.n + 'de' + m.cuota.de : '1'}-${m.fecha}-${(h >>> 0).toString(36)}`;
+};
+
+function categoriaPara(comercio, descripcion, tipo) {
+  const prev = [...activos()].sort(ordenReciente).find(g => g.comercio.toLowerCase() === comercio.toLowerCase());
+  if (prev) return { cat: prev.categoria, como: 'historial' };
+  if (tipo === 'cargo') return { cat: 'Extras', como: 'regla' };
+  const sug = sugerirCategoria(`${comercio} ${descripcion}`);
+  return sug ? { cat: sug, como: 'regla' } : { cat: 'Supervivencia', como: 'revisar' };
+}
+
+// Prepara la vista previa: qué es nuevo, qué ya estaba importado y qué ya tenía boleta.
+function prepararImportacion(r) {
+  const usados = new Set();
+  return r.gastos.map(m => {
+    const id = idCartola(r, m);
+    const fila = { m, id, incluir: true, estado: 'nuevo', ...categoriaPara(m.comercio, m.descripcion, m.tipo) };
+    if (S.gastos.some(g => g.id === id || (g.conciliado?.ref === m.ref && Math.round(g.monto) === Math.round(m.monto)))) { fila.estado = 'importado'; fila.incluir = false; return fila; }
+    const par = activos().find(g => !deCartola(g) && !usados.has(g.id) && Math.round(g.monto) === Math.round(m.monto) && Math.abs(diffDays(g.fecha, m.fecha)) <= 3);
+    if (par) { usados.add(par.id); fila.estado = 'boleta'; fila.par = par; fila.incluir = false; fila.cat = par.categoria; }
+    return fila;
+  });
+}
+
+async function importarCartola(file) {
+  toast('Leyendo cartola…', 8000);
+  let r;
+  try {
+    r = await leerCartola(file);
+  } catch (e) {
+    console.error(e);
+    return toast('⚠ No se pudo leer el PDF: ' + (e.message || e), 5000);
+  }
+  el('toast').classList.remove('is-on');
+  if (!r.gastos.length) return toast('⚠ No se encontraron movimientos en este PDF. Envíe el archivo para agregar su formato.', 6000);
+  const filas = prepararImportacion(r);
+  abrir(vistaImportacion(r, filas));
+}
+
+function vistaImportacion(r, filas) {
+  const etiqueta = { nuevo: '', importado: '<span class="status-chip ok">Ya importado</span>', boleta: '' };
+  const sel = (f, i) => `<select class="imp-cat" data-i="${i}" aria-label="Categoría">${S.categorias.map(c => `<option${c === f.cat ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
+  const resumen = () => {
+    const inc = filas.filter(f => f.incluir);
+    return { n: inc.length, total: inc.reduce((s, f) => s + f.m.monto, 0) };
+  };
+  return {
+    kicker: 'IMPORTAR · CARTOLA', titulo: `${r.banco}${r.tarjeta ? ' ••' + r.tarjeta : ''}`,
+    html() {
+      const nBoleta = filas.filter(f => f.estado === 'boleta').length;
+      const nImp = filas.filter(f => f.estado === 'importado').length;
+      const nRev = filas.filter(f => f.estado === 'nuevo' && f.como === 'revisar').length;
+      const cuotas = r.gastos.filter(g => g.tipo === 'cuota');
+      const { n, total: t } = resumen();
+      const porCat = agrupar(filas.filter(f => f.incluir).map(f => ({ categoria: f.cat, monto: f.m.monto })), g => g.categoria);
+      let ins = `<p>Período facturado <b>${r.periodo ? `${fechaLarga(r.periodo.desde)} al ${fechaLarga(r.periodo.hasta)}` : '—'}</b>: ${r.gastos.length} cargos por <b>${$(r.total)}</b>, que cuadran con el total facturado de la cartola.</p>`;
+      if (cuotas.length) ins += `<p>${cuotas.length} son <b>cuotas</b>: se registra el valor de la cuota que paga este mes, no la compra completa.</p>`;
+      if (nBoleta) ins += `<p><b>${nBoleta}</b> ya los tenía registrados con boleta: no se duplican, solo quedan marcados como conciliados con el banco.</p>`;
+      if (nImp) ins += `<p><b>${nImp}</b> ya se habían importado antes.</p>`;
+      if (nRev) ins += `<p><b>${nRev}</b> comercios no se pudieron clasificar solos (marcados <span class="tag-pendiente">● revisar</span>): elija su categoría.</p>`;
+      const omit = r.omitidos.length ? `<p class="muted small">No se importan: ${r.omitidos.map(o => `${esc(o.descripcion)} (${esc(o.motivo.toLowerCase())})`).join('; ')}.</p>` : '';
+      return hero($(t), '', n ? `${n} ${n === 1 ? 'gasto' : 'gastos'} a importar` : 'Esta cartola ya está importada')
+        + `<div class="insight">${ins}</div>${omit}`
+        + (porCat.length ? hbars(porCat.map(c => ({ name: c.clave, value: c.total, color: colorCat(c.clave), extra: pctPlano(c.total / t * 100) })), '') : '')
+        + `<div class="row"><button class="btn-primary" id="imp-ok" ${n ? '' : 'disabled'}>${n ? `Importar ${n} ${n === 1 ? 'gasto' : 'gastos'}` : 'Nada nuevo que importar'}</button><button class="btn-ghost" id="imp-todos">Marcar todos</button><button class="btn-ghost" id="imp-ninguno">Desmarcar todos</button></div>`
+        + `<div class="panel panel-flush"><div class="table-wrap"><table class="imp-tabla">
+          <thead><tr><th></th><th>Fecha</th><th>Comercio</th><th>Categoría</th><th class="num">Monto</th></tr></thead>
+          <tbody>${filas.map((f, i) => `<tr class="${f.incluir ? '' : 'imp-off'}">
+            <td><input type="checkbox" class="imp-chk" data-i="${i}" ${f.incluir ? 'checked' : ''} ${f.estado === 'importado' ? 'disabled' : ''} aria-label="Incluir"></td>
+            <td class="mono">${fechaCorta(f.m.fechaGasto)}</td>
+            <td><div>${esc(f.m.comercio)}${f.estado === 'nuevo' && f.como === 'revisar' ? '<span class="tag-pendiente">● revisar</span>' : ''}</div>
+              <div class="id">${esc(f.m.descripcion)}${f.m.tipo === 'cuota' ? ` · cuota ${f.m.cuota.n}/${f.m.cuota.de} de ${$(f.m.montoTotal)}` : ''}</div>
+              ${f.estado === 'boleta' ? `<div class="small" style="color:var(--good)">✔ Ya registrado con boleta: ${folio(f.par)} · ${esc(f.par.comercio)}</div>` : ''}${etiqueta[f.estado]}</td>
+            <td>${f.estado === 'importado' ? '' : sel(f, i)}</td>
+            <td class="num">${$(f.m.monto)}</td></tr>`).join('')}</tbody></table></div></div>`;
+    },
+    montar(body) {
+      const refrescar = () => { const y = body.scrollTop; pintarDrawer(); el('drawer-body').scrollTop = y; };
+      body.querySelectorAll('.imp-chk').forEach(c => c.addEventListener('change', () => { filas[c.dataset.i].incluir = c.checked; refrescar(); }));
+      body.querySelectorAll('.imp-cat').forEach(c => c.addEventListener('change', () => { const f = filas[c.dataset.i]; f.cat = c.value; f.como = 'usuario'; refrescar(); }));
+      body.querySelector('#imp-todos').addEventListener('click', () => { filas.forEach(f => { if (f.estado === 'nuevo') f.incluir = true; }); refrescar(); });
+      body.querySelector('#imp-ninguno').addEventListener('click', () => { filas.forEach(f => { f.incluir = false; }); refrescar(); });
+      body.querySelector('#imp-ok').addEventListener('click', async e => {
+        e.currentTarget.disabled = true;
+        const n = await confirmarImportacion(r, filas);
+        cerrar();
+        toast(`✔ ${n.creados} gastos importados${n.conciliados ? ` · ${n.conciliados} conciliados con boleta` : ''}`, 4000);
+        irA('dashboard');
+      });
+    },
+  };
+}
+
+async function confirmarImportacion(r, filas) {
+  const ahora = Date.now();
+  let seq = S.gastos.reduce((m, x) => Math.max(m, x.seq || 0), 0);
+  let creados = 0, conciliados = 0;
+  const por = nubeEmail() || undefined;
+  const origenDe = m => ({ tipo: 'cartola', banco: r.banco, tarjeta: r.tarjeta, estado: r.fechaEstado, ref: m.ref, descripcion: m.descripcion, fechaOperacion: m.fecha, cuota: m.cuota, montoOperacion: m.montoTotal });
+  for (const f of filas) {
+    const m = f.m;
+    if (f.estado === 'boleta') {
+      // conciliación: la boleta registrada aparece en el banco
+      const g = S.gastos.find(x => x.id === f.par.id);
+      if (g && !g.conciliado) {
+        g.conciliado = { banco: r.banco, estado: r.fechaEstado, ref: m.ref };
+        g.modificado = ahora;
+        g.historial = [...(g.historial || []), { ts: ahora, accion: 'Conciliado con cartola', detalle: `${r.banco} ••${r.tarjeta || ''} · ${m.descripcion}`, por }];
+        await db.put('gastos', g);
+        conciliados++;
+      }
+      continue;
+    }
+    if (!f.incluir || f.estado !== 'nuevo') continue;
+    const notas = [`${r.banco}${r.tarjeta ? ' ••' + r.tarjeta : ''} · estado de cuenta ${fechaCorta(r.fechaEstado)}`,
+      m.tipo === 'cuota' ? `cuota ${m.cuota.n}/${m.cuota.de} de compra del ${fechaCorta(m.fecha)} por ${$(m.montoTotal)}` : ''].filter(Boolean).join(' · ');
+    const g = {
+      id: f.id, seq: ++seq, monto: m.monto, fecha: m.fechaGasto, comercio: m.comercio, categoria: f.cat,
+      medioPago: 'Tarjeta de crédito', documento: 'Cartola', folio: '', rut: '', notas,
+      origen: origenDe(m), imagenId: null, imagenHash: null, creado: ahora, modificado: ahora, registradoPor: por,
+      historial: [{ ts: ahora, accion: 'Creado', detalle: `Importado desde cartola ${r.banco} (estado ${fechaCorta(r.fechaEstado)})`, por }],
+    };
+    await db.put('gastos', g);
+    creados++;
+  }
+  await cargar();
+  actualizarDatalist();
+  render();
+  programarSync(300);
+  return { creados, conciliados };
+}
+
+/* ============================================================
    Libro de gastos
    ============================================================ */
+function bindImportar() {
+  document.querySelectorAll('[data-importar]').forEach(b => b.addEventListener('click', () => el('cartola-pdf').click()));
+  el('cartola-pdf').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importarCartola(f); });
+}
+
 function bindLibro() {
   ['q', 'filtro-cat', 'filtro-mes', 'filtro-anulados'].forEach(id => el(id).addEventListener('input', renderLibro));
 }
