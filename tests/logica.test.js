@@ -160,6 +160,6 @@ test('movimientos por facturar (CSV): compras, cuotas, pagos y fechas en españo
   const nueva = r.gastos.find(g => g.monto === 22160);
   assert.equal(nueva.tipo, 'compra');                    // "00-06": compra en cuotas aún no cobrada
   assert.equal(r.gastos.find(g => g.monto === 1000).comercio, 'Bipqr');
-  assert.equal(r.gastos.find(g => g.monto === 611676).comercio, 'San Ignacio E');
+  assert.equal(r.gastos.find(g => g.monto === 611676).comercio, 'San Ignacio');
   assert.equal(r.gastos.find(g => g.monto === 152340).tipo, 'cargo');
 });

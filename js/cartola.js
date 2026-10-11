@@ -204,7 +204,7 @@ export function interpretarMovimientosCsv(texto) {
     const mc = descripcion.match(/CUOTA\s*(\d{1,2})\s*-\s*(\d{1,2})/i) || descripcion.match(/\s(\d{2})-(\d{2})\s*$/);
     out.movimientos.push({ fecha, descripcion, ref: f[2] || '', monto, cuota: mc ? { n: +mc[1], de: +mc[2] } : null });
   }
-  const fechas = out.movimientos.filter(m => !m.cuota).map(m => m.fecha).sort();
+  const fechas = out.movimientos.filter(m => !(m.cuota?.n > 0)).map(m => m.fecha).sort();
   const corte = fechas[fechas.length - 1] || null; // movimientos al día de la descarga
   out.periodo = fechas.length ? { desde: fechas[0], hasta: corte } : null;
   out.fechaEstado = corte;
