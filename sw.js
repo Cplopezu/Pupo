@@ -1,9 +1,10 @@
 // Service worker: deja la app disponible sin conexión (los datos viven en IndexedDB).
-const CACHE = 'pupo-v7';
+const CACHE = 'pupo-v8';
 const SHELL = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/db.js', 'js/util.js', 'js/analisis.js', 'js/charts.js', 'js/ocr.js', 'js/nube.js', 'js/config.js', 'js/cartola.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' evita guardar copias viejas que el navegador tenga en su memoria HTTP
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -18,8 +19,9 @@ self.addEventListener('fetch', e => {
   const propio = url.origin === location.origin;
   const recurso = /fonts\.(googleapis|gstatic)\.com|cdn\.jsdelivr\.net/.test(url.host);
   if (!propio && !recurso) return;
+  // Archivos propios: siempre se confirma con el servidor que sean la última versión (no-cache)
   e.respondWith(
-    fetch(req).then(res => {
+    fetch(propio ? new Request(req, { cache: 'no-cache' }) : req).then(res => {
       if (res.ok || res.type === 'opaque') {
         const copia = res.clone();
         caches.open(CACHE).then(c => c.put(req, copia));

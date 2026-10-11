@@ -19,6 +19,9 @@ import {
 /* ============================================================
    Configuración
    ============================================================ */
+// Versión visible en Ajustes y en Registrar, para confirmar que el teléfono tiene la última
+const VERSION = '2026.10.11-csv';
+
 // Las 4 categorías del método Kakebo
 const CATEGORIAS_BASE = ['Supervivencia', 'Ocio y vicio', 'Cultura', 'Extras'];
 const KAKEBO_DESC = {
@@ -1451,16 +1454,17 @@ function prepararImportacion(r) {
 }
 
 async function importarCartola(file) {
-  toast('Leyendo cartola…', 8000);
+  toast(`Leyendo ${/\.csv$/i.test(file.name) ? 'movimientos' : 'cartola'}…`, 8000);
   let r;
   try {
     r = await leerCartola(file);
   } catch (e) {
     console.error(e);
-    return toast('⚠ No se pudo leer el PDF: ' + (e.message || e), 5000);
+    el('toast').classList.remove('is-on');
+    return dialogo({ titulo: 'No se pudo leer el archivo', texto: `${file.name}: ${String(e.message || e).replace(/\.$/, '')}. Si el problema sigue, envíe una captura de este mensaje. (Versión ${VERSION})`, ok: 'Entendido' });
   }
   el('toast').classList.remove('is-on');
-  if (!r.gastos.length) return toast('⚠ No se encontraron movimientos en este PDF. Envíe el archivo para agregar su formato.', 6000);
+  if (!r.gastos.length) return dialogo({ titulo: 'Sin movimientos', texto: `No se encontraron movimientos en ${file.name}. Envíe el archivo para agregar su formato. (Versión ${VERSION})`, ok: 'Entendido' });
   const filas = prepararImportacion(r);
   abrir(vistaImportacion(r, filas));
 }
@@ -1630,6 +1634,7 @@ async function confirmarImportacion(r, filas) {
    Libro de gastos
    ============================================================ */
 function bindImportar() {
+  el('version-app').textContent = 'v' + VERSION;
   document.querySelectorAll('[data-cobertura]').forEach(b => b.addEventListener('click', () => abrir(drillCobertura())));
   document.querySelectorAll('[data-importar]').forEach(b => b.addEventListener('click', () => el('cartola-pdf').click()));
   el('cartola-pdf').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importarCartola(f); });
@@ -1688,7 +1693,7 @@ async function renderAjustes() {
   const u = await estimarUso();
   const nImg = (await db.all('imagenes')).length;
   const ultimo = await getAjuste('ultimoRespaldo', null);
-  el('storage-info').innerHTML = `Modo: ${instalada() ? 'app instalada ✔' : 'navegador'} · Guardado protegido: ${S.persistente ? 'sí ✔' : 'no garantizado'} · Último respaldo: ${ultimo ? fechaHora(ultimo) : 'nunca'}<br>${S.gastos.length} gastos · ${nImg} fotos${u ? ` · ${(u.usage / 1048576).toFixed(1)} MB usados de ${(u.quota / 1073741824).toFixed(1)} GB disponibles` : ''}`;
+  el('storage-info').innerHTML = `Versión ${VERSION} · Modo: ${instalada() ? 'app instalada ✔' : 'navegador'} · Guardado protegido: ${S.persistente ? 'sí ✔' : 'no garantizado'} · Último respaldo: ${ultimo ? fechaHora(ultimo) : 'nunca'}<br>${S.gastos.length} gastos · ${nImg} fotos${u ? ` · ${(u.usage / 1048576).toFixed(1)} MB usados de ${(u.quota / 1073741824).toFixed(1)} GB disponibles` : ''}`;
 }
 
 async function exportarJSON() {
