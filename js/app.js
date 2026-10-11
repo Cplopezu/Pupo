@@ -62,7 +62,7 @@ const colorCat = c => { const i = S.categorias.indexOf(c); return i >= 0 && i < 
 const activos = () => S.gastos.filter(g => !g.anulado);
 const folio = g => 'G-' + String(g.seq || 0).padStart(5, '0');
 const deCartola = g => g.origen?.tipo === 'cartola' || !!g.conciliado;
-const tieneRespaldo = g => !!g.imagenId || deCartola(g);
+const tieneRespaldo = g => !!g.imagenId || deCartola(g) || g.origen?.tipo === 'precierre';
 
 function deltaChip(v, { invertir = false } = {}) {
   if (v == null || !isFinite(v)) return '<span class="delta flat">nuevo</span>';
@@ -1073,7 +1073,9 @@ function drillGasto(id) {
             <dt>Documento</dt><dd>${esc(g.documento || '—')}${g.folio ? ' N° ' + esc(g.folio) : ''}</dd>
             <dt>RUT emisor</dt><dd class="mono">${esc(g.rut || '—')}</dd>
             <dt>Notas</dt><dd>${esc(g.notas || '—')}</dd>
+            ${g.origen?.tipo === 'precierre' ? `<dt>Origen</dt><dd>Movimiento por facturar ${esc(g.origen.banco)} ••${esc(g.origen.tarjeta || '')} (descargado al ${fechaLarga(g.origen.estado)})${g.conciliado ? '' : ' · se confirmará con la próxima cartola'}<br><span class="mono small">${esc(g.origen.descripcion)}</span></dd>` : ''}
             ${g.origen?.tipo === 'cartola' ? `<dt>Origen</dt><dd>Cartola ${esc(g.origen.banco)} ••${esc(g.origen.tarjeta || '')} · estado ${fechaLarga(g.origen.estado)}<br><span class="mono small">${esc(g.origen.descripcion)} · ref ${esc(g.origen.ref)}</span></dd>` : ''}
+            ${g.porFacturar && !g.conciliado ? `<dt>Banco</dt><dd>Aparece en los movimientos por facturar del ${fechaLarga(g.porFacturar.al)}; se conciliará con la próxima cartola.</dd>` : ''}
             ${g.conciliado ? `<dt>Conciliado</dt><dd>✔ Aparece en la cartola ${esc(g.conciliado.banco)} del ${fechaLarga(g.conciliado.estado)} (ref ${esc(g.conciliado.ref)})</dd>` : ''}
             <dt>Registrado</dt><dd>${g.creado ? fechaHora(g.creado) : '—'}${g.registradoPor ? ` · ${esc(g.registradoPor)}` : ''}</dd>
             <dt>Última modificación</dt><dd>${g.modificado ? fechaHora(g.modificado) : '—'}</dd>
@@ -1393,11 +1395,14 @@ async function guardarGasto() {
    ============================================================ */
 // Identificador estable de cada movimiento: reimportar la misma cartola no duplica nada.
 // Incluye monto y descripción porque el banco repite códigos de referencia (p. ej. comisiones del mismo día).
-const idCartola = (r, m) => {
+const idCartola = (r, m, k = 0) => {
   const clave = `${m.descripcion}|${m.valorCuota}`;
   let h = 0;
   for (const ch of clave) h = (h * 31 + ch.charCodeAt(0)) | 0;
-  return `cart-${r.tarjeta || 'x'}-${m.ref}-${m.cuota ? m.cuota.n + 'de' + m.cuota.de : '1'}-${m.fecha}-${(h >>> 0).toString(36)}`;
+  const base = r.tipo === 'precierre'
+    ? `mov-${r.tarjeta || 'x'}-${m.fecha}-${(h >>> 0).toString(36)}`  // el N° de operación del CSV viene truncado: no sirve de clave
+    : `cart-${r.tarjeta || 'x'}-${m.ref}-${m.cuota ? m.cuota.n + 'de' + m.cuota.de : '1'}-${m.fecha}-${(h >>> 0).toString(36)}`;
+  return k ? `${base}-${k}` : base;
 };
 
 function categoriaPara(comercio, descripcion, tipo) {
@@ -1416,19 +1421,29 @@ const primeraPalabra = t => (String(t || '').toLowerCase().normalize('NFD').repl
 
 function prepararImportacion(r) {
   const usados = new Set();
+  // candidatos a conciliar: registros a mano y movimientos por facturar aún no confirmados por una cartola
   const manuales = activos().filter(g => !deCartola(g) && !NO_TARJETA.has(g.medioPago));
+  const fechaRef = g => g.origen?.fechaOperacion || g.fecha;
+  const repetidos = new Map();
   return r.gastos.map(m => {
-    const id = idCartola(r, m);
+    const base = idCartola(r, m);
+    const k = repetidos.get(base) || 0; repetidos.set(base, k + 1);
+    const id = idCartola(r, m, k);
     const fila = { m, id, incluir: true, estado: 'nuevo', ...categoriaPara(m.comercio, m.descripcion, m.tipo) };
     // ya importado antes, o cuota de una compra que usted registró completa y ya se concilió
-    const previo = S.gastos.find(g => g.id === id || (g.conciliado?.ref === m.ref && (igual(g.monto, m.monto) || igual(g.monto, m.montoTotal))));
-    if (previo) { fila.estado = previo.id === id ? 'importado' : 'cuota-registrada'; fila.par = previo; fila.incluir = false; return fila; }
-    const cerca = g => !usados.has(g.id) && Math.abs(diffDays(g.fecha, m.fecha)) <= 3;
+    const previo = S.gastos.find(g => g.id === id || g.porFacturar?.clave === id
+      || (g.conciliado?.ref === m.ref && (igual(g.monto, m.monto) || igual(g.monto, m.montoTotal))));
+    if (previo) {
+      // cuota de una compra registrada completa, o movimiento ya conciliado en una importación anterior
+      fila.estado = previo.id !== id && m.tipo === 'cuota' && !igual(previo.monto, m.monto) ? 'cuota-registrada' : 'importado';
+      fila.par = previo; fila.incluir = false; return fila;
+    }
+    const cerca = g => !usados.has(g.id) && Math.abs(diffDays(fechaRef(g), m.fecha)) <= 3 && !(m.cuota?.n > 0 && g.origen?.cuota?.n > 0 && g.origen.cuota.n !== m.cuota.n);
     // 1) mismo monto; en cuotas, el monto total de la compra
     const par = manuales.find(g => cerca(g) && (igual(g.monto, m.monto) || (m.tipo === 'cuota' && igual(g.monto, m.montoTotal))));
     if (par) { usados.add(par.id); fila.estado = 'boleta'; fila.par = par; fila.incluir = false; fila.cat = par.categoria; return fila; }
     // 2) parecido: mismo comercio y monto cercano (propina, redondeo)
-    const pos = manuales.find(g => cerca(g) && Math.abs(diffDays(g.fecha, m.fecha)) <= 2 && primeraPalabra(g.comercio) === primeraPalabra(m.comercio)
+    const pos = manuales.find(g => cerca(g) && Math.abs(diffDays(fechaRef(g), m.fecha)) <= 2 && primeraPalabra(g.comercio) === primeraPalabra(m.comercio)
       && Math.abs(g.monto - m.monto) <= Math.max(1000, m.monto * 0.15));
     if (pos) { usados.add(pos.id); fila.estado = 'posible'; fila.par = pos; fila.incluir = false; fila.cat = pos.categoria; }
     return fila;
@@ -1467,9 +1482,13 @@ function vistaImportacion(r, filas) {
       const cuotas = r.gastos.filter(g => g.tipo === 'cuota');
       const { n, total: t } = resumen();
       const porCat = agrupar(filas.filter(f => f.incluir).map(f => ({ categoria: f.cat, monto: f.m.monto })), g => g.categoria);
-      let ins = `<p>Período facturado <b>${r.periodo ? `${fechaLarga(r.periodo.desde)} al ${fechaLarga(r.periodo.hasta)}` : '—'}</b>: ${r.gastos.length} cargos por <b>${$(r.total)}</b>, que cuadran con el total facturado de la cartola.</p>`;
-      if (cuotas.length) ins += `<p>${cuotas.length} son <b>cuotas</b>: se registra el valor de la cuota que paga este mes, no la compra completa.</p>`;
-      if (nBoleta) ins += `<p><b>${nBoleta}</b> ya los tenía registrados con boleta: no se duplican, solo quedan marcados como conciliados con el banco.</p>`;
+      let ins = r.tipo === 'precierre'
+        ? `<p><b>Movimientos aún no facturados</b> del ${r.periodo ? `${fechaLarga(r.periodo.desde)} al ${fechaLarga(r.periodo.hasta)}` : '—'}: ${r.gastos.length} cargos por <b>${$(r.total)}</b>. Cuando llegue la cartola del mes, la app los reconocerá y no los duplicará.</p>`
+        : `<p>Período facturado <b>${r.periodo ? `${fechaLarga(r.periodo.desde)} al ${fechaLarga(r.periodo.hasta)}` : '—'}</b>: ${r.gastos.length} cargos por <b>${$(r.total)}</b>, que cuadran con el total facturado de la cartola.</p>`;
+      const dobles = [...agrupar(r.gastos.filter(g => g.tipo === 'compra'), g => `${g.fecha}|${g.descripcion}|${g.monto}`)].filter(x => x.n > 1);
+      if (dobles.length) ins += `<p>⚠ El banco muestra cargos repetidos el mismo día: ${dobles.map(x => `<b>${esc(x.items[0].comercio)} ${$(x.items[0].monto)}</b> (${x.n} veces, ${fechaCorta(x.items[0].fecha)})`).join(', ')}. Se importan todos; si es un doble cobro, revíselo con el banco.</p>`;
+      if (cuotas.length) ins += `<p>${cuotas.length} son <b>cuotas</b>: se registra el valor de la cuota que ${r.tipo === 'precierre' ? 'se cobrará' : 'paga'} este mes, no la compra completa.</p>`;
+      if (nBoleta) ins += `<p><b>${nBoleta}</b> ya ${nBoleta === 1 ? 'estaba registrado' : 'estaban registrados'} (con boleta o como movimiento por facturar): no se duplican${r.tipo === 'precierre' ? '' : ' y quedan conciliados con la cartola'}.</p>`;
       if (nPosible) ins += `<p><b>${nPosible}</b> se parecen a gastos que ya registró, con un monto algo distinto (por ejemplo, propina). Quedan sin importar; revíselos abajo.</p>`;
       if (nImp) ins += `<p><b>${nImp}</b> ya se habían importado antes.</p>`;
       if (nRev) ins += `<p><b>${nRev}</b> comercios no se pudieron clasificar solos (marcados <span class="tag-pendiente">● revisar</span>): elija su categoría.</p>`;
@@ -1562,13 +1581,22 @@ async function confirmarImportacion(r, filas) {
   let seq = S.gastos.reduce((m, x) => Math.max(m, x.seq || 0), 0);
   let creados = 0, conciliados = 0;
   const por = nubeEmail() || undefined;
-  const origenDe = m => ({ tipo: 'cartola', banco: r.banco, tarjeta: r.tarjeta, estado: r.fechaEstado, periodo: r.periodo, ref: m.ref, descripcion: m.descripcion, fechaOperacion: m.fecha, cuota: m.cuota, montoOperacion: m.montoTotal });
+  const origenDe = m => ({ tipo: r.tipo === 'precierre' ? 'precierre' : 'cartola', banco: r.banco, tarjeta: r.tarjeta, estado: r.fechaEstado, periodo: r.periodo, ref: m.ref, descripcion: m.descripcion, fechaOperacion: m.fecha, cuota: m.cuota, montoOperacion: m.montoTotal });
   for (const f of filas) {
     const m = f.m;
     if ((f.estado === 'boleta' || f.estado === 'posible') && !f.incluir) {
       // conciliación: el gasto registrado a mano aparece en el banco; no se crea otro
       const g = S.gastos.find(x => x.id === f.par.id);
-      if (g && !g.conciliado) {
+      if (g && r.tipo === 'precierre') {
+        // coincidencia provisional: el gasto sigue esperando la cartola definitiva para conciliarse
+        if (!g.porFacturar) {
+          g.porFacturar = { banco: r.banco, al: r.fechaEstado, clave: f.id };
+          g.modificado = ahora;
+          g.historial = [...(g.historial || []), { ts: ahora, accion: 'Visto en movimientos por facturar', detalle: `${r.banco} ••${r.tarjeta || ''} · ${m.descripcion}`, por }];
+          await db.put('gastos', g);
+          conciliados++;
+        }
+      } else if (g && !g.conciliado) {
         g.conciliado = { banco: r.banco, estado: r.fechaEstado, ref: m.ref };
         g.modificado = ahora;
         g.historial = [...(g.historial || []), { ts: ahora, accion: 'Conciliado con cartola', detalle: `${r.banco} ••${r.tarjeta || ''} · ${m.descripcion}`, por }];
@@ -1578,13 +1606,15 @@ async function confirmarImportacion(r, filas) {
       continue;
     }
     if (!f.incluir || f.estado === 'importado' || f.estado === 'cuota-registrada') continue;
-    const notas = [`${r.banco}${r.tarjeta ? ' ••' + r.tarjeta : ''} · estado de cuenta ${fechaCorta(r.fechaEstado)}`,
-      m.tipo === 'cuota' ? `cuota ${m.cuota.n}/${m.cuota.de} de compra del ${fechaCorta(m.fecha)} por ${$(m.montoTotal)}` : ''].filter(Boolean).join(' · ');
+    const precierre = r.tipo === 'precierre';
+    const notas = [`${r.banco}${r.tarjeta ? ' ••' + r.tarjeta : ''} · ${precierre ? `movimiento por facturar (al ${fechaCorta(r.fechaEstado)})` : `estado de cuenta ${fechaCorta(r.fechaEstado)}`}`,
+      m.tipo === 'cuota' ? `cuota ${m.cuota.n}/${m.cuota.de} de compra del ${fechaCorta(m.fecha)}${precierre ? '' : ` por ${$(m.montoTotal)}`}` : '',
+      m.cuota?.n === 0 ? `compra en ${m.cuota.de} cuotas` : ''].filter(Boolean).join(' · ');
     const g = {
       id: f.id, seq: ++seq, monto: m.monto, fecha: m.fechaGasto, comercio: m.comercio, categoria: f.cat,
-      medioPago: 'Tarjeta de crédito', documento: 'Cartola', folio: '', rut: '', notas,
+      medioPago: 'Tarjeta de crédito', documento: precierre ? 'Movimiento por facturar' : 'Cartola', folio: '', rut: '', notas,
       origen: origenDe(m), imagenId: null, imagenHash: null, creado: ahora, modificado: ahora, registradoPor: por,
-      historial: [{ ts: ahora, accion: 'Creado', detalle: `Importado desde cartola ${r.banco} (estado ${fechaCorta(r.fechaEstado)})`, por }],
+      historial: [{ ts: ahora, accion: 'Creado', detalle: precierre ? `Importado desde movimientos por facturar ${r.banco} (al ${fechaCorta(r.fechaEstado)})` : `Importado desde cartola ${r.banco} (estado ${fechaCorta(r.fechaEstado)})`, por }],
     };
     await db.put('gastos', g);
     creados++;

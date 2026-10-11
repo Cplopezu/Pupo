@@ -53,7 +53,7 @@ export function limpiarComercio(desc) {
   let s = String(desc || '')
     .replace(/\bO?\s*TASA INT\.?\s*[\d,]*\s*%?/gi, ' ')
     .replace(/\s+/g, ' ').trim();
-  s = s.replace(PREFIJOS, '').trim();
+  s = s.replace(PREFIJOS, '').replace(/\s+[A-Z]$/i, '').replace(/^\d{2,}\s+/, '').trim();
   for (let i = 0; i < 3; i++) s = s.replace(CIUDADES, '').trim();
   s = s.replace(/^\d+-/, '').replace(/\s+\d+$/, '').replace(/\s+TASA\s+[\d,]+\s*%$/i, '').trim();
   if (!s) s = String(desc || '').trim();
@@ -63,11 +63,34 @@ export function limpiarComercio(desc) {
     .replace(/\b(Spa|Sa|Ltda)\b\.?$/i, m => m.toUpperCase());
 }
 
+// Algunos PDF juntan varias columnas en un solo bloque de texto ("09/10/2026 0012345678 COPEC APP", "$819.45701/01").
+// Se separan en piezas: fecha, referencia, montos y cuota, dejando el resto como descripción.
+function separarPiezas(fila) {
+  const out = [];
+  for (const it of fila) {
+    const palabras = it.s.split(/\s+/).filter(Boolean);
+    let texto = [], i = 0, previa = null;
+    const volcar = () => { if (texto.length) { out.push({ x: it.x + i * 0.01, s: texto.join(' ') }); texto = []; } };
+    for (const w of palabras) {
+      i++;
+      const pegado = w.match(/^(\$-?\d{1,3}(?:\.\d{3})*)(\d{2}\/\d{2})$/);
+      let piezas = null;
+      if (pegado) piezas = [pegado[1], pegado[2]];
+      else if (reFecha.test(w) || reDinero.test(w) || (previa && reFecha.test(previa) && reRef.test(w)) || (previa && reDinero.test(previa) && /^\d{2}\/\d{2}$/.test(w))) piezas = [w];
+      if (piezas) { volcar(); piezas.forEach(pz => out.push({ x: it.x + i * 0.01, s: pz })); previa = piezas[piezas.length - 1]; }
+      else { texto.push(w); previa = w; }
+    }
+    volcar();
+  }
+  return out;
+}
+
 /**
  * Interpreta las filas de un estado de cuenta.
  * Devuelve los movimientos a considerar como gasto y los que se omiten (pagos, cuotas futuras).
  */
 export function interpretarCartola({ filas, titulo = '' }) {
+  filas = filas.map(separarPiezas);
   const texto = filas.map(textoFila).join('\n');
   const out = { banco: /security/i.test(titulo + texto) ? 'Banco Security' : (titulo || 'Banco'), tarjeta: null, periodo: null, movimientos: [], omitidos: [] };
   const mt = texto.match(/\*{4}\s*(\d{4})/);
@@ -120,7 +143,7 @@ export function interpretarCartola({ filas, titulo = '' }) {
     delete m.xDesc;
     m.descripcion = m.descripcion.replace(/\s+/g, ' ').trim();
     if (m.seccion === 4) { out.omitidos.push({ ...m, motivo: 'Cuota futura (aún no se cobra)' }); continue; }
-    if (m.valorCuota <= 0 || /^(MONTO CANCELADO|PAGO\b|ABONO\b|NOTA DE CR[EÉ]DITO|REVERSA)/i.test(m.descripcion)) { out.omitidos.push({ ...m, motivo: 'Pago o abono a la tarjeta' }); continue; }
+    if (m.valorCuota <= 0 || /^(MONTO CANCELADO|PAGO (TARJETA|TOTAL|M[IÍ]NIMO|EN L[IÍ]NEA)|ABONO\b|NOTA DE CR[EÉ]DITO|REVERSA)/i.test(m.descripcion)) { out.omitidos.push({ ...m, motivo: 'Pago o abono a la tarjeta' }); continue; }
     if (m.cuota && m.cuota.n === 0) { out.omitidos.push({ ...m, motivo: 'Cuota futura (aún no se cobra)' }); continue; }
     const enCuotas = m.cuota && m.cuota.de > 1;
     const dentro = desde && m.fecha >= desde && m.fecha <= hasta;
@@ -139,6 +162,67 @@ export function interpretarCartola({ filas, titulo = '' }) {
 }
 
 export async function leerCartola(file) {
-  const datos = new Uint8Array(await file.arrayBuffer());
-  return interpretarCartola(await filasDePdf(datos));
+  const buf = await file.arrayBuffer();
+  if (/\.(csv|txt)$/i.test(file.name) || /csv|text\/plain/.test(file.type)) {
+    let texto = new TextDecoder('utf-8').decode(buf);
+    if (texto.includes('\uFFFD')) texto = new TextDecoder('windows-1252').decode(buf);
+    if (!esMovimientosCsv(texto)) throw new Error('El archivo no tiene el formato de movimientos del banco (columnas Glosa y Monto).');
+    return interpretarMovimientosCsv(texto);
+  }
+  return interpretarCartola(await filasDePdf(new Uint8Array(buf)));
+}
+
+/* ---------- Movimientos no facturados (CSV "pre-cierre" de Banco Security) ---------- */
+const MESES_CSV = { ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6, jul: 7, ago: 8, sep: 9, sept: 9, set: 9, oct: 10, nov: 11, dic: 12 };
+function fechaCsv(t) {
+  const m = String(t || '').trim().toLowerCase().match(/^(\d{1,2})[-/ ]([a-zñ]+|\d{1,2})\.?[-/ ](\d{2,4})$/);
+  if (!m) return null;
+  const mes = /^\d+$/.test(m[2]) ? +m[2] : MESES_CSV[m[2]];
+  if (!mes) return null;
+  const y = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+  return `${y}-${String(mes).padStart(2, '0')}-${String(+m[1]).padStart(2, '0')}`;
+}
+
+// Comercios pegados al medio de pago en el CSV: "MERPAGOBIPQR", "PAYCWPSSAN IGNACIO", "RedGlobaROSA CABRERA"
+const PREFIJOS_PEGADOS = /^(MERCADOPAGO|MERPAGO|PAYCWPS|REDGLOBA)\s*\*?\s*|^(MP|PAYU|RAPYD|TUU|FUDO|KS)\s*\*?\s+/i;
+
+export function esMovimientosCsv(texto) {
+  return /glosa/i.test(texto.slice(0, 400)) && /monto/i.test(texto.slice(0, 400));
+}
+
+export function interpretarMovimientosCsv(texto) {
+  const filas = texto.replace(/^﻿/, '').split(/\r?\n/).map(l => l.split(';').map(c => c.trim()));
+  const out = { banco: 'Banco Security', tarjeta: null, tipo: 'precierre', periodo: null, fechaEstado: null, movimientos: [], omitidos: [], gastos: [] };
+  for (const f of filas) {
+    const mt = f[0].match(/Tarjeta:.*?(\d{4})\s*$/i);
+    if (mt) { out.tarjeta = mt[1]; continue; }
+    const fecha = fechaCsv(f[0]);
+    if (!fecha || !f[1]) continue;
+    const monto = parseMonto(f[3]);
+    if (!isFinite(monto)) continue;
+    const descripcion = f[1].replace(/\s+/g, ' ');
+    const mc = descripcion.match(/CUOTA\s*(\d{1,2})\s*-\s*(\d{1,2})/i) || descripcion.match(/\s(\d{2})-(\d{2})\s*$/);
+    out.movimientos.push({ fecha, descripcion, ref: f[2] || '', monto, cuota: mc ? { n: +mc[1], de: +mc[2] } : null });
+  }
+  const fechas = out.movimientos.filter(m => !m.cuota).map(m => m.fecha).sort();
+  const corte = fechas[fechas.length - 1] || null; // movimientos al día de la descarga
+  out.periodo = fechas.length ? { desde: fechas[0], hasta: corte } : null;
+  out.fechaEstado = corte;
+  for (const m of out.movimientos) {
+    if (m.monto <= 0 || /^(MONTO CANCELADO|PAGO (TARJETA|TOTAL|M[IÍ]NIMO|EN L[IÍ]NEA)|ABONO\b|NOTA DE CR[EÉ]DITO|REVERSA)/i.test(m.descripcion)) {
+      out.omitidos.push({ ...m, motivo: 'Pago o abono a la tarjeta' }); continue;
+    }
+    const base = m.descripcion.replace(/\s*(CUOTA\s*)?\d{1,2}\s*-\s*\d{1,2}\s*C?t?\s*$/i, '').replace(PREFIJOS_PEGADOS, '');
+    let comercio = marcaConocida(m.descripcion) || limpiarComercio(base);
+    // "00-06": compra nueva en cuotas que aún no se cobra; se registra completa (como al registrarla a mano)
+    let tipo = m.cuota && m.cuota.n > 0 ? 'cuota' : 'compra';
+    if (/TRADOLARPESO|TRASPASO.*(DOLAR|INTERNACIONAL)/i.test(m.descripcion)) { comercio = 'Compras en el extranjero (traspaso a pesos)'; tipo = 'cargo'; }
+    out.gastos.push({
+      ...m, tipo, comercio, valorCuota: m.monto, montoTotal: m.monto,
+      // la cuota se cobrará en la próxima cartola: se registra a la fecha de corte de este archivo
+      fechaGasto: tipo === 'cuota' && corte && m.fecha < out.periodo.desde ? corte : m.fecha,
+    });
+  }
+  out.total = out.gastos.reduce((s, g) => s + g.monto, 0);
+  return out;
 }

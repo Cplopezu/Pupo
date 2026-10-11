@@ -66,7 +66,7 @@ test('interpretar reconoce marcas y razón social junto al RUT', () => {
   assert.equal(r.comercio, 'Comercial La Espiga SPA');
 });
 
-import { interpretarCartola, limpiarComercio } from '../js/cartola.js';
+import { interpretarCartola, limpiarComercio, interpretarMovimientosCsv } from '../js/cartola.js';
 
 // Filas sintéticas con la misma estructura que entrega pdf.js para un estado de cuenta de tarjeta.
 const it = (x, s) => ({ x, s });
@@ -135,4 +135,31 @@ TOTAL A PAGAR $ 15.000`;
 test('fechas imposibles o muy antiguas no se aceptan', () => {
   assert.equal(interpretar('TOTAL 1.000\nFECHA 31/02/2026', new Date(2026, 9, 9)).fecha, undefined);
   assert.equal(interpretar('TOTAL 1.000\nFECHA 10/09/2009', new Date(2026, 9, 9)).fecha, undefined);
+});
+
+test('movimientos por facturar (CSV): compras, cuotas, pagos y fechas en español', () => {
+  const csv = '\uFEFFNombre;Glosa;Nº operación;Monto en pesos\r\n'
+    + 'Tarjeta: XXXX XXXX XXXX 4321;;;\r\n'
+    + '10-oct-26;MERPAGOBIPQR;634654003907;1.000\r\n'
+    + '08-oct-26;PAGO COTIZACIONES NUE;85436556281100600000000;145.425\r\n'
+    + '08-oct-26;MANANTIAL WEBPAY;85436556282100600000000;12.990\r\n'
+    + '05-oct-26;Monto Cancelado;0;-3.654.765\r\n'
+    + '05-oct-26;TRADOLARPESO;0;152.340\r\n'
+    + '30-sept-26;PAYCWPSSAN IGNACIO E;85436556273100400000000;611.676\r\n'
+    + '26-sept-26;MERPAGOMERCADOLIBRE 00-06;29974946269806600000000;22.160\r\n'
+    + '05-sept-26;MP MERCADOLIBRE CUOTA02-06 Ct;0;1.984\r\n;;;\r\n';
+  const r = interpretarMovimientosCsv(csv);
+  assert.equal(r.tarjeta, '4321');
+  assert.deepEqual(r.periodo, { desde: '2026-09-26', hasta: '2026-10-10' });
+  assert.equal(r.gastos.length, 7);
+  assert.equal(r.omitidos.length, 1);                    // solo el pago a la tarjeta
+  assert.ok(r.gastos.some(g => g.comercio === 'Cotizaciones previsionales'));
+  const cuota = r.gastos.find(g => g.tipo === 'cuota');
+  assert.deepEqual(cuota.cuota, { n: 2, de: 6 });
+  assert.equal(cuota.fechaGasto, '2026-10-10');          // se cobrará en la próxima cartola
+  const nueva = r.gastos.find(g => g.monto === 22160);
+  assert.equal(nueva.tipo, 'compra');                    // "00-06": compra en cuotas aún no cobrada
+  assert.equal(r.gastos.find(g => g.monto === 1000).comercio, 'Bipqr');
+  assert.equal(r.gastos.find(g => g.monto === 611676).comercio, 'San Ignacio E');
+  assert.equal(r.gastos.find(g => g.monto === 152340).tipo, 'cargo');
 });

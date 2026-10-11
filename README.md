@@ -19,6 +19,11 @@ Es una aplicación web instalable (PWA): funciona en el celular con la cámara, 
 - Si un gasto ya estaba registrado a mano, no se duplica: queda **conciliado** con el banco. Reconoce el mismo monto (±3 días), la compra en cuotas registrada completa (y sus cuotas de los meses siguientes) y pregunta por los parecidos con otro monto (propinas). Los gastos en efectivo, débito o transferencia no se cruzan con la tarjeta. Reimportar la misma cartola no crea nada nuevo.
 - La categoría que usted elija para un comercio se recuerda para las cartolas siguientes. El PDF se lee en el propio equipo.
 
+**Movimientos por facturar (CSV)**
+- El archivo de movimientos no facturados que entrega Banco Security (.csv) se importa igual que la cartola, para ver el gasto del mes antes de que cierre.
+- Lo que ya tenía con boleta se reconoce. Cuando llega la cartola definitiva, los movimientos importados del CSV se concilian con ella y no se duplican; solo entra lo nuevo (por ejemplo, comisiones).
+- Advierte cargos repetidos el mismo día (posibles dobles cobros).
+
 **Trazabilidad**
 - Folio interno correlativo (`G-00001`…).
 - Huella **SHA-256** de cada foto, con botón para *verificar integridad* (detecta si la imagen fue alterada).

@@ -51,7 +51,8 @@ const MARCAS_CARTOLA = [
   [/COMUNIDAD\s*FELIZ|COMUNIDADFELIZ/i, 'ComunidadFeliz (gastos comunes)'], [/KRISPY|KRISPYKR/i, 'Krispy Kreme'], [/H&M/i, 'H&M'],
   [/CL[IÍ]NICA\s*ALEMANA/i, 'Clínica Alemana'], [/EQUIFAX/i, 'Equifax'], [/\bTGR\b/i, 'Tesorería (TGR)'], [/^SII\b|\bSII\s/i, 'SII'],
   [/LET\.?\s*HIPOTEC/i, 'Dividendo hipotecario'], [/MASVIDA/i, 'Isapre Nueva Masvida'], [/CINNABON/i, 'Cinnabon'],
-  [/AKIPARK|PARKING|ESTACIONAMIENT/i, 'Estacionamiento'], [/AUTOPIST/i, 'Autopista'], [/WEBPAY\s*MUNICIPAL/i, 'Municipalidad (pago web)'],
+  [/AKIPARK|PARKING|ESTACIONAMIENT/i, 'Estacionamiento'], [/GOOGLE\s*(GOOGLE\s*)?ONE/i, 'Google One'], [/NETFLIX/i, 'Netflix'], [/SPOTIFY/i, 'Spotify'],
+  [/COTIZACIONES/i, 'Cotizaciones previsionales'], [/IKEA/i, 'IKEA'], [/PARQUE\s*ARAUCO/i, 'Parque Arauco'], [/AUTOPIST/i, 'Autopista'], [/WEBPAY\s*MUNICIPAL/i, 'Municipalidad (pago web)'],
 ];
 
 // Devuelve el nombre normalizado si el texto corresponde a una marca conocida.
